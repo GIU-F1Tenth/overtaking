@@ -8,13 +8,13 @@ bestFS_node:
     
     # Input marker topic for goal points
     marker_topic: "/astar_lookahead_marker"
-    
+    point_topic: "/clicked_point"
     # Output path topic
     path_topic: "/pp_path"
     
     # Transform frames
     map_frame: "map"
-    base_frame: "laser"
+    base_frame: "ego_racecar/laser_model"
     
     # Path planning parameters
     planning:
