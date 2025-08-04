@@ -237,7 +237,7 @@ class BestFirstSearch(Node):
                         0 <= self.map_.data[self.pose_to_cell(new_node)] < 99):
 
                     new_node.heuristic = self.manhattan_distance(
-                        new_node, goal_node)
+                        new_node, goal_node) + self.map_.data[self.pose_to_cell(new_node)]
                     new_node.prev = active_node
 
                     pending_nodes.put(new_node)

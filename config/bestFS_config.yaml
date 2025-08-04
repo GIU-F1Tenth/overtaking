@@ -4,7 +4,7 @@ bestFS_node:
     is_antiClockwise: false
     
     # Costmap topic subscription
-    costmap_topic: "/map"
+    costmap_topic: "/costmap/costmap"
     
     # Input marker topic for goal points
     marker_topic: "/astar_lookahead_marker"
