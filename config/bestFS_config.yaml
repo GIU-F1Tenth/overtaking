@@ -1,0 +1,40 @@
+bestFS_node:
+  ros__parameters:
+    # Direction of path traversal (clockwise/anticlockwise)
+    is_antiClockwise: false
+    
+    # Costmap topic subscription
+    costmap_topic: "/map"
+    
+    # Input marker topic for goal points
+    marker_topic: "/astar_lookahead_marker"
+    
+    # Output path topic
+    path_topic: "/pp_path"
+    
+    # Transform frames
+    map_frame: "map"
+    base_frame: "laser"
+    
+    # Path planning parameters
+    planning:
+      # Movement directions (4-connected or 8-connected)
+      use_8_connected: false
+      
+      # Cost parameters
+      base_movement_cost: 1
+      diagonal_movement_cost: 14  # sqrt(2) * 10 for 8-connected
+      
+      # Obstacle rejection parameters
+      reject_behind_robot: true
+      
+    # Occupancy grid parameters
+    occupancy:
+      # Threshold for considering a cell as occupied
+      occupied_threshold: 99
+      
+      # Threshold for considering a cell as free
+      free_threshold: 0
+    
+    # Logging parameters
+    log_level: "INFO"
