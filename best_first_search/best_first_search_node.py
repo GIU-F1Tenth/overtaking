@@ -236,7 +236,7 @@ class BestFirstSearch(Node):
                 if (new_node not in visited_nodes and self.pose_on_map(new_node) and
                         0 <= self.map_.data[self.pose_to_cell(new_node)] < 99):
 
-                    new_node.heuristic = self.manhattan_distance(
+                    new_node.heuristic = self.euclidean_distance(
                         new_node, goal_node) + self.map_.data[self.pose_to_cell(new_node)]
                     new_node.prev = active_node
 
@@ -262,6 +262,9 @@ class BestFirstSearch(Node):
 
     def manhattan_distance(self, node: GraphNode, goal_node: GraphNode):
         return abs(node.x - goal_node.x) + abs(node.y - goal_node.y)
+
+    def euclidean_distance(self, node: GraphNode, goal_node: GraphNode):
+        return np.sqrt((node.x - goal_node.x) ** 2 + (node.y - goal_node.y) ** 2)
 
     def pose_on_map(self, node: GraphNode):
         return 0 <= node.x < self.map_.info.width and 0 <= node.y < self.map_.info.height
