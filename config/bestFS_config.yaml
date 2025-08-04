@@ -14,7 +14,7 @@ bestFS_node:
     
     # Transform frames
     map_frame: "map"
-    base_frame: "ego_racecar/laser_model"
+    base_frame: "base_link"
     
     # Path planning parameters
     planning:

@@ -51,5 +51,3 @@ qtcreator-*
 CATKIN_IGNORE
 
 .vscode/
-resource/
-test/
