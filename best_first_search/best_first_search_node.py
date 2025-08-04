@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-A* Path Planner Module
+Best First Search Path Planner Module
 
-This module implements an A* path planning algorithm for autonomous navigation.
+This module implements a Best First Search path planning algorithm for autonomous navigation.
 It subscribes to occupancy grids and goal markers, then computes optimal paths
-using the A* search algorithm.
+using the Best First Search algorithm.
 """
 
 import rclpy
@@ -29,7 +29,7 @@ class GraphNode:
     and heuristic values for the A* algorithm.
     """
 
-    def __init__(self, x, y, cost=0, heuristic=0, prev=None):
+    def __init__(self, x, y, heuristic=0, prev=None):
         """
         Initialize a graph node.
 
@@ -46,7 +46,7 @@ class GraphNode:
         self.prev = prev
 
     def __lt__(self, other):
-        return (self.cost + self.heuristic) < (other.cost + other.heuristic)
+        return (self.heuristic) < (other.heuristic)
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y
@@ -74,7 +74,7 @@ class BestFirstSearch(Node):
         Sets up subscribers, publishers, parameters, and TF listeners.
         """
         super().__init__("bestFS_node")
-
+        self.get_logger().info("Best First Search Node Initialized")
         # Set up TF2 for coordinate transformations
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -91,6 +91,7 @@ class BestFirstSearch(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("base_frame", "laser")
         self.declare_parameter("visited_map_topic", "/visited_map")
+        self.declare_parameter("point_topic", "/clicked_point")
 
         # Get parameter values
         self.is_antiClockwise = self.get_parameter(
@@ -107,13 +108,18 @@ class BestFirstSearch(Node):
             "base_frame").get_parameter_value().string_value
         self.visited_map_topic = self.get_parameter(
             "visited_map_topic").get_parameter_value().string_value
+        self.point_topic = self.get_parameter(
+            "point_topic").get_parameter_value().string_value
 
         # Set up subscribers and publishers
         self.map_sub = self.create_subscription(
             OccupancyGrid, self.costmap_topic, self.map_callback, map_qos
         )
-        self.point_sub = self.create_subscription(
-            Marker, self.marker_topic, self.point_callback, 10
+        self.lookahead_point_sub = self.create_subscription(
+            Marker, self.marker_topic, self.lookahead_point_callback, 10
+        )
+        self.goal_sub = self.create_subscription(
+            PointStamped, self.point_topic, self.goal_callback, 10
         )
         self.path_pub = self.create_publisher(Path, self.path_topic, 10)
         self.map_pub = self.create_publisher(OccupancyGrid, self.visited_map_topic, 10)
@@ -134,7 +140,7 @@ class BestFirstSearch(Node):
         self.visited_map_.info = map_msg.info
         self.visited_map_.data = [-1] * (map_msg.info.height * map_msg.info.width)
 
-    def point_callback(self, marker: Marker):
+    def lookahead_point_callback(self, marker: Marker):
         """
         Callback function for processing goal markers.
 
@@ -144,7 +150,7 @@ class BestFirstSearch(Node):
         if self.map_ is None:
             self.get_logger().error("No map received!")
             return
-        # self.visited_map_.data = [-1] * (self.visited_map_.info.height * self.visited_map_.info.width)
+        self.visited_map_.data = [-1] * (self.visited_map_.info.height * self.visited_map_.info.width)
 
         pose = PoseStamped()
         pose.pose.position.x = marker.pose.position.x
@@ -163,6 +169,7 @@ class BestFirstSearch(Node):
         map_to_base_pose.position.y = map_to_base_tf.transform.translation.y
         map_to_base_pose.orientation = map_to_base_tf.transform.rotation
 
+        # sending goal pose to the planner
         path = self.plan(map_to_base_pose, pose.pose)
         if path.poses:
             self.get_logger().info("Shortest path found!")
@@ -170,7 +177,7 @@ class BestFirstSearch(Node):
         else:
             self.get_logger().warn("No path found to the goal.")
 
-    def goal_callback(self, pose: PoseStamped):
+    def goal_callback(self, point: PointStamped):
         if self.map_ is None:
             self.get_logger().error("No map received!")
             return
@@ -179,7 +186,7 @@ class BestFirstSearch(Node):
 
         try:
             map_to_base_tf = self.tf_buffer.lookup_transform(
-                self.map_.header.frame_id, "base_link", rclpy.time.Time()
+                self.map_.header.frame_id, self.base_frame, rclpy.time.Time()
             )
         except LookupException:
             self.get_logger().error("Could not transform from map to base_link")
@@ -190,6 +197,11 @@ class BestFirstSearch(Node):
         map_to_base_pose.position.y = map_to_base_tf.transform.translation.y
         map_to_base_pose.orientation = map_to_base_tf.transform.rotation
 
+        pose = PoseStamped()
+        pose.pose.position.x = point.point.x
+        pose.pose.position.y = point.point.y
+
+        # sending goal pose to the planner
         path = self.plan(map_to_base_pose, pose.pose)
         if path.poses:
             self.get_logger().info("Shortest path found!")
@@ -224,8 +236,8 @@ class BestFirstSearch(Node):
                 if (new_node not in visited_nodes and self.pose_on_map(new_node) and
                         0 <= self.map_.data[self.pose_to_cell(new_node)] < 99):
 
-                    new_node.heuristic = self.manhattan_distance(
-                        new_node, goal_node)
+                    new_node.heuristic = self.euclidean_distance(
+                        new_node, goal_node) + self.map_.data[self.pose_to_cell(new_node)]
                     new_node.prev = active_node
 
                     pending_nodes.put(new_node)
@@ -250,6 +262,9 @@ class BestFirstSearch(Node):
 
     def manhattan_distance(self, node: GraphNode, goal_node: GraphNode):
         return abs(node.x - goal_node.x) + abs(node.y - goal_node.y)
+
+    def euclidean_distance(self, node: GraphNode, goal_node: GraphNode):
+        return np.sqrt((node.x - goal_node.x) ** 2 + (node.y - goal_node.y) ** 2)
 
     def pose_on_map(self, node: GraphNode):
         return 0 <= node.x < self.map_.info.width and 0 <= node.y < self.map_.info.height

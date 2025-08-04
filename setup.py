@@ -4,7 +4,6 @@ from glob import glob
 from setuptools import setup
 
 package_name = 'overtaking'
-
 setup(
     name=package_name,
     version='0.0.0',
@@ -29,7 +28,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            "bestFS_exe = overtaking.best_first_search.best_first_search:main"
+            "bestFS_exe = best_first_search.best_first_search_node:main"
         ],
     },
 )

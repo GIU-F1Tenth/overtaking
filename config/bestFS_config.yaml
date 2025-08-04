@@ -4,17 +4,17 @@ bestFS_node:
     is_antiClockwise: false
     
     # Costmap topic subscription
-    costmap_topic: "/map"
+    costmap_topic: "/costmap/costmap"
     
     # Input marker topic for goal points
     marker_topic: "/astar_lookahead_marker"
-    
+    point_topic: "/clicked_point"
     # Output path topic
     path_topic: "/pp_path"
     
     # Transform frames
     map_frame: "map"
-    base_frame: "laser"
+    base_frame: "base_link"
     
     # Path planning parameters
     planning:
