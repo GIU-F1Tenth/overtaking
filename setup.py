@@ -28,7 +28,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            "bestFS_exe = best_first_search.best_first_search_node:main"
+            "bestFS_exe = best_first_search.best_first_search_node:main",
+            "potential_field_exe = potential_field.potential_field_node:main"
         ],
     },
 )

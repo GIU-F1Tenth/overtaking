@@ -3,8 +3,7 @@ bestFS_node:
     # Direction of path traversal (clockwise/anticlockwise)
     is_antiClockwise: false
     
-    # Costmap topic subscription
-    costmap_topic: "/costmap/costmap"
+    costmap_topic: "/inflated_costmap"
     
     # Input marker topic for goal points
     marker_topic: "/astar_lookahead_marker"
@@ -14,7 +13,7 @@ bestFS_node:
     
     # Transform frames
     map_frame: "map"
-    base_frame: "base_link"
+    base_frame: "ego_racecar/laser"
     
     # Path planning parameters
     planning:
