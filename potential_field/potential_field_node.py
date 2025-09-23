@@ -19,38 +19,7 @@ from pynput import keyboard
 from tf2_ros import Buffer, TransformListener, LookupException, ConnectivityException, ExtrapolationException
 import tf2_geometry_msgs.tf2_geometry_msgs as tf2_gm
 from geometry_msgs.msg import PoseStamped, Pose
-
-def euler_from_quaternion(quaternion):
-    """
-    Convert quaternion to Euler angles.
-
-    Converts quaternion (w in last place) to euler roll, pitch, yaw.
-    This should be replaced when porting for ROS 2 Python tf_conversions is done.
-
-    Args:
-        quaternion (list): Quaternion as [x, y, z, w]
-
-    Returns:
-        tuple: (roll, pitch, yaw) in radians
-    """
-    x = quaternion[0]
-    y = quaternion[1]
-    z = quaternion[2]
-    w = quaternion[3]
-
-    sinr_cosp = 2 * (w * x + y * z)
-    cosr_cosp = 1 - 2 * (x * x + y * y)
-    roll = np.arctan2(sinr_cosp, cosr_cosp)
-
-    sinp = 2 * (w * y - z * x)
-    pitch = np.arcsin(sinp)
-
-    siny_cosp = 2 * (w * z + x * y)
-    cosy_cosp = 1 - 2 * (y * y + z * z)
-    yaw = np.arctan2(siny_cosp, cosy_cosp)
-
-    return roll, pitch, yaw
-
+from tf_transformations import euler_from_quaternion
 
 class PotentialFieldNode(Node):
     def __init__(self):
