@@ -14,12 +14,12 @@ from pynput import keyboard
 
 class DWAParams:
     def __init__(self):
-        self.n_omega = 30
-        self.prediction_horizon = 15
-        self.omega_min = -2.5
-        self.omega_max = 2.5
+        self.n_omega = 25
+        self.prediction_horizon = 20
+        self.omega_min = -1.5
+        self.omega_max = 1.5
         self.dt = 0.1
-        self.goal = [5.0, 5.0]
+        self.goal = [5.0, 5.0] # in map frame
         self.v_max = 1.0
         self.r_buffer = 0.1
         self.obstacles = np.zeros((0, 3))
@@ -36,8 +36,11 @@ class DWAAckermannNode(Node):
         self.map_frame = self.declare_parameter("map_frame", "map").value
         self.scan_topic = self.declare_parameter("scan_topic", "/scan").value
         self.lookahead_sub_topic = self.declare_parameter("lookahead_sub_topic", "lookahead_goal").value
-        self.limit_angle = self.declare_parameter("limit_angle", 60).value
+        self.limit_angle = self.declare_parameter("limit_angle", 50).value
         self.laser_distance_from_base_link = self.declare_parameter("laser_distance_from_base_link", 0.275).value
+        self.max_lidar_distance = self.declare_parameter('max_lidar_distance', 1.6).value
+        self.kp = self.declare_parameter('kp', 1.5).value
+        self.kd = self.declare_parameter('kd', 1.5).value
 
         self.parms = DWAParams()
         self.parms.obstacles_cost = self.declare_parameter("obstacles_cost", 0.005).value
@@ -46,6 +49,9 @@ class DWAAckermannNode(Node):
         self.pose = [0.0, 0.0, 0.0]
         self.car_pose_in_map = Pose()
         self.vel = 0.0
+
+        # Control
+        self.last_error = 0.0
 
         # ROS interfaces
         self.create_subscription(PoseStamped, "/goal_pose", self.goal_cb, 10)
@@ -85,8 +91,8 @@ class DWAAckermannNode(Node):
         omega_all = np.linspace(self.parms.omega_min, self.parms.omega_max, self.parms.n_omega)
         all_trajs = []
         for omega in omega_all:
-            z = [[x0, y0, theta0]]
-            z0 = [x0, y0, theta0]
+            z = [[x0, y0, theta0]] # z is the integrated trajectory for each omega at each step
+            z0 = [x0, y0, theta0] # z0 is the initial conditions of the integration
             for _ in range(self.parms.prediction_horizon):
                 z0 = self._euler_integration(z0, [self.v, omega])
                 z.append(z0)
@@ -129,7 +135,7 @@ class DWAAckermannNode(Node):
 
         points_map = []
         for r, a in zip(ranges, angles):
-            if r <= 1.0:
+            if r <= self.max_lidar_distance:
                 lx, ly = r * math.cos(a), r * math.sin(a)
                 p = Pose()
                 p.position.x, p.position.y = lx, ly
@@ -164,7 +170,11 @@ class DWAAckermannNode(Node):
 
         cmd = AckermannDriveStamped()
         cmd.drive.speed = self.vel
-        cmd.drive.steering_angle = math.atan2(chosen_omega * 0.95, self.vel) if self.vel != 0 else 0.0
+        # add a PD controller
+        error = math.atan2(chosen_omega * 0.33, self.vel) - 0 if self.vel != 0 else 0.0 
+        p_controller = self.kp * error
+        d_controller = self.kd * (error - self.last_error)
+        cmd.drive.steering_angle = p_controller + d_controller
         self.pub_cmd.publish(cmd)
 
         self.get_logger().info(
@@ -219,7 +229,7 @@ class DWAAckermannNode(Node):
     # ----------------- Keyboard -----------------
     def on_press(self, key):
         if hasattr(key, "char") and key.char == "a":
-            self.vel = 2.0
+            self.vel = 1.9
 
     def on_release(self, key):
         self.vel = 0.0
