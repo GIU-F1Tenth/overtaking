@@ -15,10 +15,10 @@ from pynput import keyboard
 class DWAParams:
     def __init__(self):
         self.n_omega = 25
-        self.prediction_horizon = 20
+        self.prediction_horizon = 10
         self.omega_min = -1.5
         self.omega_max = 1.5
-        self.dt = 0.1
+        self.dt = 0.2
         self.goal = [5.0, 5.0] # in map frame
         self.v_max = 1.0
         self.r_buffer = 0.1
@@ -180,9 +180,9 @@ class DWAAckermannNode(Node):
         cmd.drive.steering_angle = p_controller + d_controller
         self.pub_cmd.publish(cmd)
 
-        self.get_logger().info(
-            f"DWA -> omega: {chosen_omega:.3f}, goal: {self.parms.goal}, obstacles: {len(self.parms.obstacles)}"
-        )
+        # self.get_logger().info(
+        #     f"DWA -> omega: {chosen_omega:.3f}, goal: {self.parms.goal}, obstacles: {len(self.parms.obstacles)}"
+        # )
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):
@@ -242,7 +242,7 @@ class DWAAckermannNode(Node):
     # ----------------- Keyboard -----------------
     def on_press(self, key):
         if hasattr(key, "char") and key.char == "a":
-            self.vel = 2.5
+            self.vel = 3.5
 
     def on_release(self, key):
         self.vel = 0.0
