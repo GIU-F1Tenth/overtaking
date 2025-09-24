@@ -14,13 +14,15 @@ from pynput import keyboard
 
 class DWAParams:
     def __init__(self):
-        self.n_omega = 25
-        self.prediction_horizon = 10
+        self.n_v_omega = 30
+        self.prediction_horizon = 12
         self.omega_min = -1.5
         self.omega_max = 1.5
+        self.v_min = 1.0
+        self.v_max = 4.5
+        self.integ_vel = 1.0
         self.dt = 0.2
         self.goal = [5.0, 5.0] # in map frame
-        self.v_max = 1.0
         self.r_buffer = 0.1
         self.obstacles = np.zeros((0, 3))
         self.obstacles_cost = 0.005
@@ -31,7 +33,6 @@ class DWAAckermannNode(Node):
         super().__init__("dwa_ackermann_node")
 
         # Parameters
-        self.v = self.declare_parameter("speed", 1.0).value
         self.base_link_frame = self.declare_parameter("base_link", "ego_racecar/base_link").value
         self.map_frame = self.declare_parameter("map_frame", "map").value
         self.scan_topic = self.declare_parameter("scan_topic", "/scan").value
@@ -39,6 +40,7 @@ class DWAAckermannNode(Node):
         self.limit_angle = self.declare_parameter("limit_angle", 50).value
         self.laser_distance_from_base_link = self.declare_parameter("laser_distance_from_base_link", 0.275).value
         self.max_lidar_distance = self.declare_parameter('max_lidar_distance', 1.6).value
+        self.spread_gaussian = self.declare_parameter('spread_gaussian', 3.0).value
         self.kp = self.declare_parameter('kp', 1.5).value
         self.kd = self.declare_parameter('kd', 1.5).value
 
@@ -48,7 +50,7 @@ class DWAAckermannNode(Node):
         # State
         self.pose = [0.0, 0.0, 0.0]
         self.car_pose_in_map = Pose()
-        self.vel = 0.0
+        self.vel = False
 
         # Control
         self.last_error = 0.0
@@ -88,16 +90,28 @@ class DWAAckermannNode(Node):
 
     def _simulate_trajectories(self, x0, y0, theta0):
         """Generate candidate trajectories for all sampled angular velocities."""
-        omega_all = np.linspace(self.parms.omega_min, self.parms.omega_max, self.parms.n_omega)
+        omega_all = np.linspace(self.parms.omega_min, self.parms.omega_max, self.parms.n_v_omega)
         all_trajs = []
         for omega in omega_all:
             z = [[x0, y0, theta0]] # z is the integrated trajectory for each omega at each step
             z0 = [x0, y0, theta0] # z0 is the initial conditions of the integration
             for _ in range(self.parms.prediction_horizon):
-                z0 = self._euler_integration(z0, [self.v, omega])
+                z0 = self._euler_integration(z0, [self.parms.integ_vel, omega])
                 z.append(z0)
             all_trajs.append(np.array(z))
         return omega_all, all_trajs
+
+    def compute_linear_vel(self):
+        # Create Gaussian-shaped velocity distribution
+        idx = np.arange(self.parms.n_v_omega)
+        center = (self.parms.n_v_omega - 1) / 2.0
+        sigma = self.parms.n_v_omega / self.spread_gaussian  # spread of Gaussian
+        gaussian_weights = np.exp(-0.5 * ((idx - center) / sigma) ** 2)
+
+        # Normalize to [v_min, v_max]
+        gaussian_weights = (gaussian_weights - gaussian_weights.min()) / (gaussian_weights.max() - gaussian_weights.min())
+        v_all = self.parms.v_min + gaussian_weights * (self.parms.v_max - self.parms.v_min)
+        return v_all
 
     def _compute_cost(self, traj):
         """Compute combined cost to goal and obstacles for a single trajectory."""
@@ -114,8 +128,9 @@ class DWAAckermannNode(Node):
         x0, y0, theta0 = (0, 0, 0) # since we are computing everything in the vehicle's frame, so our position is (0, 0, 0)
         omega_all, all_trajs = self._simulate_trajectories(x0, y0, theta0)
         costs = [self._compute_cost(traj) for traj in all_trajs]
+        v_all = self.compute_linear_vel()
         chosen_idx = int(np.argmin(costs))
-        return omega_all[chosen_idx], chosen_idx, all_trajs
+        return v_all[chosen_idx], omega_all[chosen_idx], chosen_idx, all_trajs
 
     # ----------------- ROS Callbacks -----------------
     def goal_cb(self, msg: PoseStamped):
@@ -168,13 +183,17 @@ class DWAAckermannNode(Node):
             self.get_logger().warn(f"Transform not available: {e}")
 
     def control_loop(self):
-        chosen_omega, chosen_idx, all_trajs = self._run_dwa()
+        chosen_v, chosen_omega, chosen_idx, all_trajs = self._run_dwa()
         self.publish_horizon_markers(all_trajs, chosen_idx)
 
         cmd = AckermannDriveStamped()
-        cmd.drive.speed = self.vel
+        if self.vel:
+            cmd.drive.speed = chosen_v
+        else:
+            cmd.drive.speed = 0.0
+
         # add a PD controller
-        error = math.atan2(chosen_omega * 0.33, self.vel) - 0 if self.vel != 0 else 0.0 
+        error = math.atan2(chosen_omega * 0.33, chosen_v) if chosen_v != 0 else 0.0 
         p_controller = self.kp * error
         d_controller = self.kd * (error - self.last_error)
         cmd.drive.steering_angle = p_controller + d_controller
@@ -242,10 +261,10 @@ class DWAAckermannNode(Node):
     # ----------------- Keyboard -----------------
     def on_press(self, key):
         if hasattr(key, "char") and key.char == "a":
-            self.vel = 3.5
+            self.vel = True
 
     def on_release(self, key):
-        self.vel = 0.0
+        self.vel = False
         self.pub_cmd.publish(AckermannDriveStamped())
         if key == keyboard.Key.esc:
             return False
