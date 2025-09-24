@@ -111,21 +111,24 @@ class DWAAckermannNode(Node):
 
     def _run_dwa(self):
         """Run the full DWA calculation and return chosen omega and trajectory index."""
-        x0, y0, theta0 = self.pose
+        x0, y0, theta0 = (0, 0, 0) # since we are computing everything in the vehicle's frame, so our position is (0, 0, 0)
         omega_all, all_trajs = self._simulate_trajectories(x0, y0, theta0)
         costs = [self._compute_cost(traj) for traj in all_trajs]
         chosen_idx = int(np.argmin(costs))
         return omega_all[chosen_idx], chosen_idx, all_trajs
 
     # ----------------- ROS Callbacks -----------------
-    def goal_cb(self, msg):
-        self.parms.goal = [msg.pose.position.x, msg.pose.position.y]
-        self.publish_goal_marker(*self.parms.goal)
+    def goal_cb(self, msg: PoseStamped):
+        goal_on_map = [msg.pose.position.x, msg.pose.position.y]
+        self.publish_goal_marker(*goal_on_map)
+        goal_x_in_car, goal_y_in_car = self.transform_to_vehicle_frame(msg.pose, self.car_pose_in_map)
+        self.parms.goal = [goal_x_in_car, goal_y_in_car] # goal in vehicle's frame
 
-    def lookahead_goal_cb(self, msg):
-        self.parms.goal = [msg.pose.position.x, msg.pose.position.y]
+    def lookahead_goal_cb(self, msg: PoseStamped):
+        goal_x_in_car, goal_y_in_car = self.transform_to_vehicle_frame(msg.pose, self.car_pose_in_map)
+        self.parms.goal = [goal_x_in_car, goal_y_in_car] # goal in vehicle's frame
 
-    def scan_cb(self, msg):
+    def scan_cb(self, msg: LaserScan):
         angles = np.arange(msg.angle_min, msg.angle_max, msg.angle_increment)
         ranges = np.array(msg.ranges)
         valid = np.isfinite(ranges)
@@ -139,8 +142,7 @@ class DWAAckermannNode(Node):
                 lx, ly = r * math.cos(a), r * math.sin(a)
                 p = Pose()
                 p.position.x, p.position.y = lx, ly
-                transformed = self.transform_to_map_frame(p, self.car_pose_in_map)
-                points_map.append([transformed.position.x, transformed.position.y, 0.1])
+                points_map.append([lx, ly, 0.1]) # obstacles in the vehicle's frame
         self.parms.obstacles = np.array(points_map)
 
     def get_pose(self):
@@ -155,6 +157,7 @@ class DWAAckermannNode(Node):
                 transform.transform.rotation.z,
                 transform.transform.rotation.w,
             ])[2]
+            # compensting the base_link -> laser transform
             tx = transform.transform.translation.x + self.laser_distance_from_base_link * math.cos(yaw)
             ty = transform.transform.translation.y + self.laser_distance_from_base_link * math.sin(yaw)
             self.car_pose_in_map.position.x = tx
@@ -197,7 +200,7 @@ class DWAAckermannNode(Node):
         marker_array = MarkerArray()
         for idx, traj in enumerate(all_trajs):
             m = Marker()
-            m.header.frame_id = self.map_frame
+            m.header.frame_id = self.base_link_frame
             m.header.stamp = self.get_clock().now().to_msg()
             m.ns, m.id = "dwa_horizons", idx
             m.type, m.action = Marker.LINE_STRIP, Marker.ADD
@@ -226,10 +229,20 @@ class DWAAckermannNode(Node):
         p.position.x, p.position.y = tx, ty
         return p
 
+    def transform_to_vehicle_frame(self, point_on_map: Pose, car_pose: Pose):
+        # Convert quaternion to yaw angle
+        orientation_list = [car_pose.orientation.x, car_pose.orientation.y, car_pose.orientation.z, car_pose.orientation.w]
+        _, _, yaw = euler_from_quaternion(orientation_list)
+        dx = point_on_map.position.x - car_pose.position.x
+        dy = point_on_map.position.y - car_pose.position.y
+        transformed_x = math.cos(-yaw) * dx - math.sin(-yaw) * dy
+        transformed_y = math.sin(-yaw) * dx + math.cos(-yaw) * dy
+        return transformed_x, transformed_y
+    
     # ----------------- Keyboard -----------------
     def on_press(self, key):
         if hasattr(key, "char") and key.char == "a":
-            self.vel = 1.9
+            self.vel = 2.5
 
     def on_release(self, key):
         self.vel = 0.0
