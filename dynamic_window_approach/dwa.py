@@ -14,12 +14,12 @@ from pynput import keyboard
 
 class DWAParams:
     def __init__(self):
-        self.n_v_omega = 30
+        self.n_v_omega = 25
         self.prediction_horizon = 12
-        self.omega_min = -1.5
-        self.omega_max = 1.5
-        self.v_min = 1.0
-        self.v_max = 4.5
+        self.omega_min = -2.0
+        self.omega_max = 2.0
+        self.v_min = 0.5
+        self.v_max = 2.5
         self.integ_vel = 1.0
         self.dt = 0.2
         self.goal = [5.0, 5.0] # in map frame
