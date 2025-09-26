@@ -19,7 +19,7 @@ class DWAParams:
         self.omega_min = -2.0
         self.omega_max = 2.0
         self.v_min = 0.5
-        self.v_max = 2.5
+        self.v_max = 4.5
         self.integ_vel = 1.0
         self.dt = 0.2
         self.goal = [5.0, 5.0] # in map frame
@@ -126,7 +126,7 @@ class DWAAckermannNode(Node):
     def _run_dwa(self):
         """Run full DWA calculation and return chosen (v, omega) and trajectory index."""
         x0, y0, theta0 = (0, 0, 0)  # vehicle frame
-        controls, all_trajs = self._simulate_trajectories(x0, y0, theta0)
+        omega_all, all_trajs = self._simulate_trajectories(x0, y0, theta0)
         costs = [self._compute_cost(traj) for traj in all_trajs]
         v_all = self.compute_linear_vel()
         chosen_idx = int(np.argmin(costs))
@@ -157,7 +157,7 @@ class DWAAckermannNode(Node):
                 lx, ly = r * math.cos(a), r * math.sin(a)
                 p = Pose()
                 p.position.x, p.position.y = lx, ly
-                points_map.append([lx, ly, 0.1]) # obstacles in the vehicle's frame
+                points_map.append([lx, ly, self.parms.r_buffer]) # obstacles in the vehicle's frame
         self.parms.obstacles = np.array(points_map)
 
     def get_pose(self):
