@@ -15,7 +15,7 @@ from pynput import keyboard
 class DWAParams:
     def __init__(self):
         self.n_v_omega = 25
-        self.prediction_horizon = 12
+        self.prediction_horizon = 10
         self.omega_min = -2.0
         self.omega_max = 2.0
         self.v_min = 0.5
@@ -23,10 +23,11 @@ class DWAParams:
         self.integ_vel = 1.0
         self.dt = 0.2
         self.goal = [5.0, 5.0] # in map frame
-        self.r_buffer = 0.1
+        self.r_buffer = 0.2
         self.obstacles = np.zeros((0, 3))
         self.obstacles_cost = 0.005
-
+        self.max_vel_cost = 5.0
+        self.min_vel_cost = 0.0
 
 class DWAAckermannNode(Node):
     def __init__(self):
@@ -40,8 +41,8 @@ class DWAAckermannNode(Node):
         self.limit_angle = self.declare_parameter("limit_angle", 50).value
         self.laser_distance_from_base_link = self.declare_parameter("laser_distance_from_base_link", 0.275).value
         self.max_lidar_distance = self.declare_parameter('max_lidar_distance', 1.6).value
-        self.spread_gaussian = self.declare_parameter('spread_gaussian', 3.0).value
-        self.kp = self.declare_parameter('kp', 1.5).value
+        self.spread_gaussian = self.declare_parameter('spread_gaussian', 2.5).value
+        self.kp = self.declare_parameter('kp', 2.0).value
         self.kd = self.declare_parameter('kd', 1.5).value
 
         self.parms = DWAParams()
@@ -54,6 +55,7 @@ class DWAAckermannNode(Node):
 
         # Control
         self.last_error = 0.0
+        self.opt_vel = 0.0
 
         # ROS interfaces
         self.create_subscription(PoseStamped, "/goal_pose", self.goal_cb, 10)
@@ -113,22 +115,24 @@ class DWAAckermannNode(Node):
         v_all = self.parms.v_min + gaussian_weights * (self.parms.v_max - self.parms.v_min)
         return v_all
 
-    def _compute_cost(self, traj):
+    def _compute_cost(self, traj, vel):
         """Compute combined cost to goal and obstacles for a single trajectory."""
         cost = sum(math.dist((x, y), self.parms.goal) for x, y, _ in traj)
         if self.parms.obstacles.shape[0] > 0:
             for x, y, _ in traj:
                 for x_obs, y_obs, r_obs in self.parms.obstacles:
-                    dist = max(math.dist((x_obs, y_obs), (x, y)) - (r_obs + self.parms.r_buffer), 0.001)
+                    dist = max(math.dist((x_obs, y_obs), (x, y)) - (r_obs), 0.001)
                     cost += self.parms.obstacles_cost / dist
+        velocity_cost = (1 - (vel - self.parms.v_min)/(self.parms.v_max - self.parms.v_min)) * (self.parms.max_vel_cost - self.parms.min_vel_cost) + self.parms.min_vel_cost
+        cost += velocity_cost
         return cost
 
     def _run_dwa(self):
         """Run full DWA calculation and return chosen (v, omega) and trajectory index."""
         x0, y0, theta0 = (0, 0, 0)  # vehicle frame
         omega_all, all_trajs = self._simulate_trajectories(x0, y0, theta0)
-        costs = [self._compute_cost(traj) for traj in all_trajs]
         v_all = self.compute_linear_vel()
+        costs = [self._compute_cost(traj, v_all[i]) for i, traj in enumerate(all_trajs)]
         chosen_idx = int(np.argmin(costs))
         return v_all[chosen_idx], omega_all[chosen_idx], chosen_idx, all_trajs
 
@@ -141,6 +145,7 @@ class DWAAckermannNode(Node):
 
     def lookahead_goal_cb(self, msg: PoseStamped):
         goal_x_in_car, goal_y_in_car = self.transform_to_vehicle_frame(msg.pose, self.car_pose_in_map)
+        self.opt_vel = msg.pose.orientation.w
         self.parms.goal = [goal_x_in_car, goal_y_in_car] # goal in vehicle's frame
 
     def scan_cb(self, msg: LaserScan):
@@ -188,7 +193,7 @@ class DWAAckermannNode(Node):
 
         cmd = AckermannDriveStamped()
         if self.vel:
-            cmd.drive.speed = chosen_v
+            cmd.drive.speed = min(chosen_v, self.opt_vel) # to choose the minimum velocity from the velocity gradient and the optimal one
         else:
             cmd.drive.speed = 0.0
 
