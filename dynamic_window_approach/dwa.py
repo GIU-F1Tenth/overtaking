@@ -22,11 +22,11 @@ class DWAParams:
         self.v_max = 4.5
         self.integ_vel = 1.0
         self.dt = 0.2
-        self.goal = [5.0, 5.0] # in map frame
-        self.r_buffer = 0.2
-        self.obstacles = np.zeros((0, 3))
+        self.goal = [5.0, 5.0]  # in map frame
+        self.r_buffer = 0.1
+        self.obstacles = set()   # 🔥 use a set instead of numpy array
         self.obstacles_cost = 0.005
-        self.max_vel_cost = 5.0
+        self.max_vel_cost = 3.0
         self.min_vel_cost = 0.0
 
 class DWAAckermannNode(Node):
@@ -38,7 +38,7 @@ class DWAAckermannNode(Node):
         self.map_frame = self.declare_parameter("map_frame", "map").value
         self.scan_topic = self.declare_parameter("scan_topic", "/scan").value
         self.lookahead_sub_topic = self.declare_parameter("lookahead_sub_topic", "lookahead_goal").value
-        self.limit_angle = self.declare_parameter("limit_angle", 50).value
+        self.limit_angle = self.declare_parameter("limit_angle", 90).value
         self.laser_distance_from_base_link = self.declare_parameter("laser_distance_from_base_link", 0.275).value
         self.max_lidar_distance = self.declare_parameter('max_lidar_distance', 1.6).value
         self.spread_gaussian = self.declare_parameter('spread_gaussian', 2.5).value
@@ -118,12 +118,15 @@ class DWAAckermannNode(Node):
     def _compute_cost(self, traj, vel):
         """Compute combined cost to goal and obstacles for a single trajectory."""
         cost = sum(math.dist((x, y), self.parms.goal) for x, y, _ in traj)
-        if self.parms.obstacles.shape[0] > 0:
+
+        if self.parms.obstacles:
             for x, y, _ in traj:
-                for x_obs, y_obs, r_obs in self.parms.obstacles:
-                    dist = max(math.dist((x_obs, y_obs), (x, y)) - (r_obs), 0.001)
+                for x_obs, y_obs, r_obs in self.parms.obstacles:  # 🔥 direct iteration over set
+                    dist = max(math.dist((x_obs, y_obs), (x, y)) - r_obs, 0.001)
                     cost += self.parms.obstacles_cost / dist
-        velocity_cost = (1 - (vel - self.parms.v_min)/(self.parms.v_max - self.parms.v_min)) * (self.parms.max_vel_cost - self.parms.min_vel_cost) + self.parms.min_vel_cost
+
+        velocity_cost = (1 - (vel - self.parms.v_min) / (self.parms.v_max - self.parms.v_min)) \
+                        * (self.parms.max_vel_cost - self.parms.min_vel_cost) + self.parms.min_vel_cost
         cost += velocity_cost
         return cost
 
@@ -156,14 +159,13 @@ class DWAAckermannNode(Node):
         mask = (angles >= -math.radians(self.limit_angle)) & (angles <= math.radians(self.limit_angle))
         angles, ranges = angles[mask], ranges[mask]
 
-        points_map = []
+        obstacles_set = set()
         for r, a in zip(ranges, angles):
             if r <= self.max_lidar_distance:
                 lx, ly = r * math.cos(a), r * math.sin(a)
-                p = Pose()
-                p.position.x, p.position.y = lx, ly
-                points_map.append([lx, ly, self.parms.r_buffer]) # obstacles in the vehicle's frame
-        self.parms.obstacles = np.array(points_map)
+                obstacles_set.add((lx, ly, self.parms.r_buffer))  # 🔥 store in set
+
+        self.parms.obstacles = obstacles_set
 
     def get_pose(self):
         try:
@@ -209,6 +211,8 @@ class DWAAckermannNode(Node):
         # self.get_logger().info(
         #     f"DWA -> v: {chosen_v:.2f}, omega: {chosen_omega:.3f}, goal: {self.parms.goal}, obstacles: {len(self.parms.obstacles)}"
         # )
+
+        print(len(self.parms.obstacles))
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):
