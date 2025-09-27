@@ -10,7 +10,7 @@ from tf_transformations import euler_from_quaternion
 from tf2_ros import Buffer, TransformListener
 from sensor_msgs.msg import LaserScan
 from pynput import keyboard
-
+import time
 
 class DWAParams:
     def __init__(self):
@@ -74,6 +74,9 @@ class DWAAckermannNode(Node):
         self.create_timer(0.01, self.control_loop)
         self.create_timer(0.01, self.get_pose)
 
+        self.scan_time = 0.0
+        self.dwa_time = 0.0
+
         # Keyboard listener
         keyboard.Listener(on_press=self.on_press, on_release=self.on_release).start()
         self.get_logger().info('Press "a" to drive. ESC to stop.')
@@ -132,11 +135,13 @@ class DWAAckermannNode(Node):
 
     def _run_dwa(self):
         """Run full DWA calculation and return chosen (v, omega) and trajectory index."""
+        start = time.perf_counter()
         x0, y0, theta0 = (0, 0, 0)  # vehicle frame
         omega_all, all_trajs = self._simulate_trajectories(x0, y0, theta0)
         v_all = self.compute_linear_vel()
         costs = [self._compute_cost(traj, v_all[i]) for i, traj in enumerate(all_trajs)]
         chosen_idx = int(np.argmin(costs))
+        self.dwa_time = (time.perf_counter() - start) * 1000
         return v_all[chosen_idx], omega_all[chosen_idx], chosen_idx, all_trajs
 
     # ----------------- ROS Callbacks -----------------
@@ -152,6 +157,7 @@ class DWAAckermannNode(Node):
         self.parms.goal = [goal_x_in_car, goal_y_in_car] # goal in vehicle's frame
 
     def scan_cb(self, msg: LaserScan):
+        start = time.perf_counter()
         angles = np.arange(msg.angle_min, msg.angle_max, msg.angle_increment)
         ranges = np.array(msg.ranges)
         valid = np.isfinite(ranges)
@@ -166,7 +172,7 @@ class DWAAckermannNode(Node):
                 obstacles_set.add((lx, ly, self.parms.r_buffer))  # 🔥 store in set
 
         self.parms.obstacles = obstacles_set
-
+        self.scan_time = (time.perf_counter() - start) * 1000
     def get_pose(self):
         try:
             now = rclpy.time.Time()
@@ -208,9 +214,10 @@ class DWAAckermannNode(Node):
 
         self.pub_cmd.publish(cmd)
 
-        # self.get_logger().info(
-        #     f"DWA -> v: {chosen_v:.2f}, omega: {chosen_omega:.3f}, goal: {self.parms.goal}, obstacles: {len(self.parms.obstacles)}"
-        # )
+
+        self.get_logger().info(
+            f"DWA time -> : {self.dwa_time:.3f}, scan time: {self.scan_time}"
+        )
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):
