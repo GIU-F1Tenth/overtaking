@@ -12,6 +12,7 @@ from sensor_msgs.msg import LaserScan
 from pynput import keyboard
 import time
 
+
 class DWAParams:
     def __init__(self):
         self.n_v_omega = 25
@@ -19,15 +20,17 @@ class DWAParams:
         self.omega_min = -2.0
         self.omega_max = 2.0
         self.v_min = 0.5
-        self.v_max = 4.5
+        self.v_max = 7.5
         self.integ_vel = 1.0
         self.dt = 0.2
-        self.goal = [5.0, 5.0]  # in map frame
+        self.goal = [5.0, 5.0]  # in map frame (vehicle frame used by algorithm)
         self.r_buffer = 0.1
-        self.obstacles = set()   # 🔥 use a set instead of numpy array
+        # use NumPy array for vectorized ops; empty shape (0,3) means no obstacles
+        self.obstacles = np.zeros((0, 3), dtype=float)
         self.obstacles_cost = 0.005
         self.max_vel_cost = 3.0
         self.min_vel_cost = 0.0
+
 
 class DWAAckermannNode(Node):
     def __init__(self):
@@ -38,7 +41,7 @@ class DWAAckermannNode(Node):
         self.map_frame = self.declare_parameter("map_frame", "map").value
         self.scan_topic = self.declare_parameter("scan_topic", "/scan").value
         self.lookahead_sub_topic = self.declare_parameter("lookahead_sub_topic", "lookahead_goal").value
-        self.limit_angle = self.declare_parameter("limit_angle", 50).value
+        self.limit_angle = self.declare_parameter("limit_angle", 90).value
         self.laser_distance_from_base_link = self.declare_parameter("laser_distance_from_base_link", 0.275).value
         self.max_lidar_distance = self.declare_parameter('max_lidar_distance', 1.6).value
         self.spread_gaussian = self.declare_parameter('spread_gaussian', 2.5).value
@@ -56,6 +59,9 @@ class DWAAckermannNode(Node):
         # Control
         self.last_error = 0.0
         self.opt_vel = 0.0
+
+        # Precompute omega grid (cheap) and keep v_all computed when used
+        self.omega_all = np.linspace(self.parms.omega_min, self.parms.omega_max, self.parms.n_v_omega)
 
         # ROS interfaces
         self.create_subscription(PoseStamped, "/goal_pose", self.goal_cb, 10)
@@ -82,29 +88,12 @@ class DWAAckermannNode(Node):
         self.get_logger().info('Press "a" to drive. ESC to stop.')
 
     # ----------------- DWA Internal Logic -----------------
-    def _euler_integration(self, z0, u):
-        """Integrate motion for a single step."""
-        v = min(u[0], self.parms.v_max)
-        omega = u[1]
-        x0, y0, theta0 = z0
-        return [
-            x0 + v * math.cos(theta0) * self.parms.dt,
-            y0 + v * math.sin(theta0) * self.parms.dt,
-            theta0 + omega * self.parms.dt,
-        ]
-
-    def _simulate_trajectories(self, x0, y0, theta0):
-        """Generate candidate trajectories for all sampled angular velocities."""
-        omega_all = np.linspace(self.parms.omega_min, self.parms.omega_max, self.parms.n_v_omega)
-        all_trajs = []
-        for omega in omega_all:
-            z = [[x0, y0, theta0]] # z is the integrated trajectory for each omega at each step
-            z0 = [x0, y0, theta0] # z0 is the initial conditions of the integration
-            for _ in range(self.parms.prediction_horizon):
-                z0 = self._euler_integration(z0, [self.parms.integ_vel, omega])
-                z.append(z0)
-            all_trajs.append(np.array(z))
-        return omega_all, all_trajs
+    def _euler_integration_step(self, prev, v, omega):
+        """Vectorized single integration step for arrays prev shape (n,3), v either scalar or (n,), omega (n,)"""
+        x = prev[:, 0] + v * np.cos(prev[:, 2]) * self.parms.dt
+        y = prev[:, 1] + v * np.sin(prev[:, 2]) * self.parms.dt
+        theta = prev[:, 2] + omega * self.parms.dt
+        return np.stack((x, y, theta), axis=1)
 
     def compute_linear_vel(self):
         # Create Gaussian-shaped velocity distribution
@@ -118,61 +107,102 @@ class DWAAckermannNode(Node):
         v_all = self.parms.v_min + gaussian_weights * (self.parms.v_max - self.parms.v_min)
         return v_all
 
-    def _compute_cost(self, traj, vel):
-        """Compute combined cost to goal and obstacles for a single trajectory."""
-        cost = sum(math.dist((x, y), self.parms.goal) for x, y, _ in traj)
-
-        if self.parms.obstacles:
-            for x, y, _ in traj:
-                for x_obs, y_obs, r_obs in self.parms.obstacles:  # 🔥 direct iteration over set
-                    dist = max(math.dist((x_obs, y_obs), (x, y)) - r_obs, 0.001)
-                    cost += self.parms.obstacles_cost / dist
-
-        velocity_cost = (1 - (vel - self.parms.v_min) / (self.parms.v_max - self.parms.v_min)) \
-                        * (self.parms.max_vel_cost - self.parms.min_vel_cost) + self.parms.min_vel_cost
-        cost += velocity_cost
-        return cost
-
     def _run_dwa(self):
-        """Run full DWA calculation and return chosen (v, omega) and trajectory index."""
+        """Fully vectorized DWA over all omegas and trajectory horizon.
+        Returns: chosen_v, chosen_omega, chosen_idx, all_trajs (np.ndarray shape (n_omega, horizon+1, 3))"""
         start = time.perf_counter()
-        x0, y0, theta0 = (0, 0, 0)  # vehicle frame
-        omega_all, all_trajs = self._simulate_trajectories(x0, y0, theta0)
+
+        n_omega = self.parms.n_v_omega
+        horizon = self.parms.prediction_horizon
+
+        # prepare grids
+        omega_all = self.omega_all
         v_all = self.compute_linear_vel()
-        costs = [self._compute_cost(traj, v_all[i]) for i, traj in enumerate(all_trajs)]
-        chosen_idx = int(np.argmin(costs))
+
+        # Allocate trajectory array: (n_omega, horizon+1, 3)
+        all_trajs = np.zeros((n_omega, horizon + 1, 3), dtype=float)
+        all_trajs[:, 0, :] = np.array([0.0, 0.0, 0.0])
+
+        # Integrate forward for all trajectories in a vectorized loop over time steps
+        for t in range(1, horizon + 1):
+            prev = all_trajs[:, t - 1, :]
+            # integ_vel is scalar; same for each trajectory
+            all_trajs[:, t, :] = self._euler_integration_step(prev, self.parms.integ_vel, omega_all)
+
+        # Vectorized goal cost
+        goal = np.array(self.parms.goal)
+        traj_xy = all_trajs[:, :, :2]  # (n_omega, horizon+1, 2)
+        dists_to_goal = np.linalg.norm(traj_xy - goal[None, None, :], axis=2)  # (n_omega, horizon+1)
+        goal_costs = np.sum(dists_to_goal, axis=1)  # (n_omega,)
+
+        # Vectorized obstacle cost
+        if self.parms.obstacles.shape[0] > 0:
+            obs_xy = self.parms.obstacles[:, :2]  # (M,2)
+            obs_r = self.parms.obstacles[:, 2]    # (M,)
+
+            # Broadcast differences: (n_omega, horizon+1, M, 2)
+            diff = traj_xy[:, :, None, :] - obs_xy[None, None, :, :]
+            dists = np.linalg.norm(diff, axis=3) - obs_r[None, None, :]
+            dists = np.maximum(dists, 0.001)
+            inv_dists = self.parms.obstacles_cost / dists
+            obs_costs = np.sum(inv_dists, axis=(1, 2))  # sum over time and obstacles -> (n_omega,)
+        else:
+            obs_costs = np.zeros_like(goal_costs)
+
+        # Velocity costs (vectorized)
+        velocity_costs = (1 - (v_all - self.parms.v_min) / (self.parms.v_max - self.parms.v_min)) * (
+            self.parms.max_vel_cost - self.parms.min_vel_cost) + self.parms.min_vel_cost
+
+        total_costs = goal_costs + obs_costs + velocity_costs
+        chosen_idx = int(np.argmin(total_costs))
+
         self.dwa_time = (time.perf_counter() - start) * 1000
-        return v_all[chosen_idx], omega_all[chosen_idx], chosen_idx, all_trajs
+        return float(min(v_all[chosen_idx], self.opt_vel)), float(omega_all[chosen_idx]), chosen_idx, all_trajs
 
     # ----------------- ROS Callbacks -----------------
     def goal_cb(self, msg: PoseStamped):
         goal_on_map = [msg.pose.position.x, msg.pose.position.y]
         self.publish_goal_marker(*goal_on_map)
         goal_x_in_car, goal_y_in_car = self.transform_to_vehicle_frame(msg.pose, self.car_pose_in_map)
-        self.parms.goal = [goal_x_in_car, goal_y_in_car] # goal in vehicle's frame
+        self.parms.goal = [goal_x_in_car, goal_y_in_car]  # goal in vehicle's frame
 
     def lookahead_goal_cb(self, msg: PoseStamped):
         goal_x_in_car, goal_y_in_car = self.transform_to_vehicle_frame(msg.pose, self.car_pose_in_map)
         self.opt_vel = msg.pose.orientation.w
-        self.parms.goal = [goal_x_in_car, goal_y_in_car] # goal in vehicle's frame
+        self.parms.goal = [goal_x_in_car, goal_y_in_car]  # goal in vehicle's frame
 
     def scan_cb(self, msg: LaserScan):
         start = time.perf_counter()
-        angles = np.arange(msg.angle_min, msg.angle_max, msg.angle_increment)
-        ranges = np.array(msg.ranges)
+        # Build angles using number of points (safer than arange to avoid floating rounding mismatches)
+        n_pts = len(msg.ranges)
+        angles = msg.angle_min + np.arange(n_pts) * msg.angle_increment
+        ranges = np.array(msg.ranges, dtype=float)
         valid = np.isfinite(ranges)
-        angles, ranges = angles[valid], ranges[valid]
-        mask = (angles >= -math.radians(self.limit_angle)) & (angles <= math.radians(self.limit_angle))
-        angles, ranges = angles[mask], ranges[mask]
+        angles = angles[valid]
+        ranges = ranges[valid]
 
-        obstacles_set = set()
-        for r, a in zip(ranges, angles):
+        mask = (angles >= -np.deg2rad(self.limit_angle)) & (angles <= np.deg2rad(self.limit_angle))
+        angles = angles[mask]
+        ranges = ranges[mask]
+
+        # collect points in a Python list then convert once to numpy -> cheaper than frequent np.array([...]) calls
+        points = []
+        cos = np.cos(angles)
+        sin = np.sin(angles)
+        # vectorized mask already applied; now filter by distance and append
+        for r, c, s in zip(ranges, cos, sin):
             if r <= self.max_lidar_distance:
-                lx, ly = r * math.cos(a), r * math.sin(a)
-                obstacles_set.add((lx, ly, self.parms.r_buffer))  # 🔥 store in set
+                lx = r * c
+                ly = r * s
+                points.append((lx, ly, self.parms.r_buffer))
 
-        self.parms.obstacles = obstacles_set
+        if points:
+            self.parms.obstacles = np.asarray(points, dtype=float)
+        else:
+            self.parms.obstacles = np.zeros((0, 3), dtype=float)
+
         self.scan_time = (time.perf_counter() - start) * 1000
+
     def get_pose(self):
         try:
             now = rclpy.time.Time()
@@ -185,7 +215,7 @@ class DWAAckermannNode(Node):
                 transform.transform.rotation.z,
                 transform.transform.rotation.w,
             ])[2]
-            # compensting the base_link -> laser transform
+            # compensating the base_link -> laser transform
             tx = transform.transform.translation.x + self.laser_distance_from_base_link * math.cos(yaw)
             ty = transform.transform.translation.y + self.laser_distance_from_base_link * math.sin(yaw)
             self.car_pose_in_map.position.x = tx
@@ -201,12 +231,12 @@ class DWAAckermannNode(Node):
 
         cmd = AckermannDriveStamped()
         if self.vel:
-            cmd.drive.speed = min(chosen_v, self.opt_vel) # to choose the minimum velocity from the velocity gradient and the optimal one
+            cmd.drive.speed = min(chosen_v, self.opt_vel)  # choose min between DWA velocity and lookahead optimal
         else:
             cmd.drive.speed = 0.0
 
         # add a PD controller
-        error = math.atan2(chosen_omega * 0.33, chosen_v) if chosen_v != 0 else 0.0 
+        error = math.atan2(chosen_omega * 0.33, chosen_v) if chosen_v != 0 else 0.0
         p_controller = self.kp * error
         d_controller = self.kd * (error - self.last_error)
         cmd.drive.steering_angle = p_controller + d_controller
@@ -214,10 +244,8 @@ class DWAAckermannNode(Node):
 
         self.pub_cmd.publish(cmd)
 
-
-        self.get_logger().info(
-            f"DWA time -> : {self.dwa_time:.3f}, scan time: {self.scan_time}"
-        )
+        # log timings every N cycles conservatively
+        self.get_logger().info(f"DWA time -> : {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v}")
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):
@@ -233,11 +261,14 @@ class DWAAckermannNode(Node):
 
     def publish_horizon_markers(self, all_trajs, chosen_idx):
         marker_array = MarkerArray()
-        for idx, traj in enumerate(all_trajs):
+        # all_trajs may be numpy array shape (n_omega, horizon+1, 3)
+        n_omega = all_trajs.shape[0]
+        for idx in range(n_omega):
+            traj = all_trajs[idx]
             m = Marker()
             m.header.frame_id = self.base_link_frame
             m.header.stamp = self.get_clock().now().to_msg()
-            m.ns, m.id = "dwa_horizons", idx
+            m.ns, m.id = "dwa_horizons", int(idx)
             m.type, m.action = Marker.LINE_STRIP, Marker.ADD
             m.scale.x = 0.02
             if idx == chosen_idx:
@@ -246,7 +277,7 @@ class DWAAckermannNode(Node):
                 m.color.g, m.color.b = 0.5, 1.0
             m.color.a = 0.8
             for x, y, _ in traj:
-                m.points.append(Point(x=x, y=y, z=0.05))
+                m.points.append(Point(x=float(x), y=float(y), z=0.05))
             marker_array.markers.append(m)
         self.horizon_pub.publish(marker_array)
 
@@ -273,7 +304,7 @@ class DWAAckermannNode(Node):
         transformed_x = math.cos(-yaw) * dx - math.sin(-yaw) * dy
         transformed_y = math.sin(-yaw) * dx + math.cos(-yaw) * dy
         return transformed_x, transformed_y
-    
+
     # ----------------- Keyboard -----------------
     def on_press(self, key):
         if hasattr(key, "char") and key.char == "a":
