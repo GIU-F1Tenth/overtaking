@@ -38,11 +38,11 @@ class DWAAckermannNode(Node):
         self.map_frame = self.declare_parameter("map_frame", "map").value
         self.scan_topic = self.declare_parameter("scan_topic", "/scan").value
         self.lookahead_sub_topic = self.declare_parameter("lookahead_sub_topic", "lookahead_goal").value
-        self.limit_angle = self.declare_parameter("limit_angle", 90).value
+        self.limit_angle = self.declare_parameter("limit_angle", 50).value
         self.laser_distance_from_base_link = self.declare_parameter("laser_distance_from_base_link", 0.275).value
         self.max_lidar_distance = self.declare_parameter('max_lidar_distance', 1.6).value
         self.spread_gaussian = self.declare_parameter('spread_gaussian', 2.5).value
-        self.kp = self.declare_parameter('kp', 2.0).value
+        self.kp = self.declare_parameter('kp', 2.2).value
         self.kd = self.declare_parameter('kd', 1.5).value
 
         self.parms = DWAParams()
@@ -211,8 +211,6 @@ class DWAAckermannNode(Node):
         # self.get_logger().info(
         #     f"DWA -> v: {chosen_v:.2f}, omega: {chosen_omega:.3f}, goal: {self.parms.goal}, obstacles: {len(self.parms.obstacles)}"
         # )
-
-        print(len(self.parms.obstacles))
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):
