@@ -44,8 +44,6 @@ class DWAAckermannNode(Node):
         self.v_max = self.declare_parameter("dwa.v_max", 7.5).value
         self.integ_vel = self.declare_parameter("dwa.integ_vel", 1.0).value
         self.dt = self.declare_parameter("dwa.dt", 0.2).value
-        goal_list = self.declare_parameter("dwa.goal", [5.0, 5.0]).value
-        self.goal = [float(goal_list[0]), float(goal_list[1])]  # in map frame (vehicle frame used by algorithm)
         self.r_buffer = self.declare_parameter("dwa.r_buffer", 0.1).value
         self.obstacles_cost = self.declare_parameter("dwa.obstacles_cost", 0.005).value
         self.max_vel_cost = self.declare_parameter("dwa.max_vel_cost", 3.0).value
@@ -69,7 +67,8 @@ class DWAAckermannNode(Node):
         self.opt_vel = 0.0
         self.odom = None
         self.lidar_cap = 0.0
-        
+        self.goal = [0.0, 0.0]  # in map frame (vehicle frame used by algorithm)
+
         # Precompute omega grid (cheap) and keep v_all computed when used
         self.omega_all = np.linspace(self.omega_min, self.omega_max, self.n_v_omega)
 
