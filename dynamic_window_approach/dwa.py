@@ -11,6 +11,7 @@ from tf2_ros import Buffer, TransformListener
 from sensor_msgs.msg import LaserScan
 from pynput import keyboard
 import time
+from nav_msgs.msg import Odometry
 
 
 class DWAParams:
@@ -40,10 +41,12 @@ class DWAAckermannNode(Node):
         self.base_link_frame = self.declare_parameter("base_link", "ego_racecar/base_link").value
         self.map_frame = self.declare_parameter("map_frame", "map").value
         self.scan_topic = self.declare_parameter("scan_topic", "/scan").value
+        self.odom_topic = self.declare_parameter('odom_topic', '/ego_racecar/odom').value
         self.lookahead_sub_topic = self.declare_parameter("lookahead_sub_topic", "lookahead_goal").value
         self.limit_angle = self.declare_parameter("limit_angle", 90).value
         self.laser_distance_from_base_link = self.declare_parameter("laser_distance_from_base_link", 0.275).value
-        self.max_lidar_distance = self.declare_parameter('max_lidar_distance', 1.6).value
+        self.max_lidar_distance = self.declare_parameter('max_lidar_distance', 4.5).value
+        self.min_lidar_distance = self.declare_parameter('min_lidar_distance', 1.0).value
         self.spread_gaussian = self.declare_parameter('spread_gaussian', 2.5).value
         self.kp = self.declare_parameter('kp', 2.2).value
         self.kd = self.declare_parameter('kd', 1.5).value
@@ -59,7 +62,8 @@ class DWAAckermannNode(Node):
         # Control
         self.last_error = 0.0
         self.opt_vel = 0.0
-
+        self.odom = None
+        self.lidar_cap = 0.0
         # Precompute omega grid (cheap) and keep v_all computed when used
         self.omega_all = np.linspace(self.parms.omega_min, self.parms.omega_max, self.parms.n_v_omega)
 
@@ -67,6 +71,7 @@ class DWAAckermannNode(Node):
         self.create_subscription(PoseStamped, "/goal_pose", self.goal_cb, 10)
         self.create_subscription(LaserScan, self.scan_topic, self.scan_cb, 10)
         self.create_subscription(Marker, self.lookahead_sub_topic, self.lookahead_goal_cb, 10)
+        self.create_subscription(Odometry, self.odom_topic, self.odom_cb, 10)
 
         self.pub_cmd = self.create_publisher(AckermannDriveStamped, "/drive", 10)
         self.goal_marker_pub = self.create_publisher(Marker, "goal_marker", 10)
@@ -189,9 +194,12 @@ class DWAAckermannNode(Node):
         points = []
         cos = np.cos(angles)
         sin = np.sin(angles)
+
+        lidar_capping_distance = self.compute_lidar_max_dist()
+        self.lidar_cap = lidar_capping_distance
         # vectorized mask already applied; now filter by distance and append
         for r, c, s in zip(ranges, cos, sin):
-            if r <= self.max_lidar_distance:
+            if r <= lidar_capping_distance:
                 lx = r * c
                 ly = r * s
                 points.append((lx, ly, self.parms.r_buffer))
@@ -202,6 +210,15 @@ class DWAAckermannNode(Node):
             self.parms.obstacles = np.zeros((0, 3), dtype=float)
 
         self.scan_time = (time.perf_counter() - start) * 1000
+
+    def odom_cb(self, msg:Odometry):
+        self.odom = msg
+
+    def compute_lidar_max_dist(self):
+        if not self.odom:
+            return 0.0
+        linear_vel = self.odom.twist.twist.linear.x
+        return np.clip(((linear_vel/self.parms.v_max) * (self.max_lidar_distance - self.min_lidar_distance)) + self.min_lidar_distance, self.min_lidar_distance, self.max_lidar_distance)
 
     def get_pose(self):
         try:
@@ -245,7 +262,7 @@ class DWAAckermannNode(Node):
         self.pub_cmd.publish(cmd)
 
         # log timings every N cycles conservatively
-        self.get_logger().info(f"DWA time -> : {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v}")
+        self.get_logger().info(f"DWA time -> : {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v} lidar_cap: {self.lidar_cap}")
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):
