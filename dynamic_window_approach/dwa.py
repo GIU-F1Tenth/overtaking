@@ -18,7 +18,7 @@ class DWAAckermannNode(Node):
     def __init__(self):
         super().__init__("dwa_ackermann_node")
 
-        # ---------------- General Parameters ----------------
+        # General parameters
         self.base_link_frame = self.declare_parameter("base_link", "ego_racecar/base_link").value
         self.map_frame = self.declare_parameter("map_frame", "map").value
         self.scan_topic = self.declare_parameter("scan_topic", "/scan").value
@@ -32,7 +32,13 @@ class DWAAckermannNode(Node):
         self.kp = self.declare_parameter("kp", 2.2).value
         self.kd = self.declare_parameter("kd", 1.5).value
 
-        # ---------------- DWA Parameters ----------------
+        # Topic parameters (previously hardcoded)
+        self.goal_topic = self.declare_parameter("goal_topic", "/goal_pose").value
+        self.drive_topic = self.declare_parameter("drive_topic", "/drive").value
+        self.goal_marker_topic = self.declare_parameter("goal_marker_topic", "goal_marker").value
+        self.horizon_marker_topic = self.declare_parameter("horizon_marker_topic", "dwa_horizons").value
+
+        # DWA parameters
         self.n_v_omega = self.declare_parameter("dwa.n_v_omega", 25).value
         self.prediction_horizon = self.declare_parameter("dwa.prediction_horizon", 10).value
         self.omega_min = self.declare_parameter("dwa.omega_min", -2.0).value
@@ -47,28 +53,29 @@ class DWAAckermannNode(Node):
         self.max_vel_cost = self.declare_parameter("dwa.max_vel_cost", 3.0).value
         self.min_vel_cost = self.declare_parameter("dwa.min_vel_cost", 0.0).value
 
-        # ---------------- State ----------------
+        # State
         self.pose = [0.0, 0.0, 0.0]
+        self.obstacles = np.zeros((0, 3))
         self.car_pose_in_map = Pose()
         self.vel = False
+
+        # Control
         self.last_error = 0.0
         self.opt_vel = 0.0
         self.odom = None
         self.lidar_cap = 0.0
-        self.obstacles = np.zeros((0, 3), dtype=float)
-
-        # Precompute omega grid
         self.omega_all = np.linspace(self.omega_min, self.omega_max, self.n_v_omega)
 
-        # ---------------- ROS Interfaces ----------------
-        self.create_subscription(PoseStamped, "/goal_pose", self.goal_cb, 10)
+        # Subscriptions (using parametrized topics)
+        self.create_subscription(PoseStamped, self.goal_topic, self.goal_cb, 10)
         self.create_subscription(LaserScan, self.scan_topic, self.scan_cb, 10)
         self.create_subscription(PoseStamped, self.lookahead_sub_topic, self.lookahead_goal_cb, 10)
         self.create_subscription(Odometry, self.odom_topic, self.odom_cb, 10)
 
-        self.pub_cmd = self.create_publisher(AckermannDriveStamped, "/drive", 10)
-        self.goal_marker_pub = self.create_publisher(Marker, "goal_marker", 10)
-        self.horizon_pub = self.create_publisher(MarkerArray, "dwa_horizons", 10)
+        # Publishers (using parametrized topics)
+        self.pub_cmd = self.create_publisher(AckermannDriveStamped, self.drive_topic, 10)
+        self.goal_marker_pub = self.create_publisher(Marker, self.goal_marker_topic, 10)
+        self.horizon_pub = self.create_publisher(MarkerArray, self.horizon_marker_topic, 10)
 
         # TF
         self.tf_buffer = Buffer()
@@ -78,12 +85,14 @@ class DWAAckermannNode(Node):
         self.create_timer(0.01, self.control_loop)
         self.create_timer(0.01, self.get_pose)
 
+        # Performance Measurements
         self.scan_time = 0.0
         self.dwa_time = 0.0
 
         # Keyboard listener
         keyboard.Listener(on_press=self.on_press, on_release=self.on_release).start()
         self.get_logger().info('Press "a" to drive. ESC to stop.')
+
 
     # ----------------- DWA Internal Logic -----------------
     def _euler_integration_step(self, prev, v, omega):
