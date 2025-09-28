@@ -1,0 +1,30 @@
+dwa_ackermann_node:
+  ros__parameters:
+    # General params
+    base_link: "ego_racecar/base_link"
+    map_frame: "map"
+    scan_topic: "/scan"
+    odom_topic: "/ego_racecar/odom"
+    lookahead_sub_topic: "lookahead_goal"
+    limit_angle: 90
+    laser_distance_from_base_link: 0.275
+    max_lidar_distance: 4.5
+    min_lidar_distance: 1.0
+    spread_gaussian: 2.5
+    kp: 2.2
+    kd: 1.5
+
+    # DWA params
+    dwa.n_v_omega: 25
+    dwa.prediction_horizon: 10
+    dwa.omega_min: -2.0
+    dwa.omega_max: 2.0
+    dwa.v_min: 0.5
+    dwa.v_max: 7.5
+    dwa.integ_vel: 1.0
+    dwa.dt: 0.2
+    dwa.goal: [5.0, 5.0]
+    dwa.r_buffer: 0.1
+    dwa.obstacles_cost: 0.005
+    dwa.max_vel_cost: 3.0
+    dwa.min_vel_cost: 0.0

@@ -21,9 +21,9 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='George_Halim',
+    maintainer='George Halim',
     maintainer_email='georgehany064@gmail.com',
-    description='TODO: Package description',
+    description='Python package for high speed overtaking',
     license='MIT',
     tests_require=['pytest'],
     entry_points={
