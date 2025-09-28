@@ -30,15 +30,10 @@ class DWAAckermannNode(Node):
         self.drive_topic = self.declare_parameter("drive_topic", "/drive").value
         self.goal_marker_topic = self.declare_parameter("goal_marker_topic", "goal_marker").value
         self.horizon_marker_topic = self.declare_parameter("horizon_marker_topic", "dwa_horizons").value
-        
+
         # General parameters
-        self.limit_angle = self.declare_parameter("limit_angle", 90).value
         self.laser_distance_from_base_link = self.declare_parameter("laser_distance_from_base_link", 0.275).value
-        self.max_lidar_distance = self.declare_parameter('max_lidar_distance', 4.5).value
-        self.min_lidar_distance = self.declare_parameter('min_lidar_distance', 1.0).value
-        self.spread_gaussian = self.declare_parameter('spread_gaussian', 2.5).value
-        self.kp = self.declare_parameter('kp', 2.2).value
-        self.kd = self.declare_parameter('kd', 1.5).value
+        self.wheel_base_length = self.declare_parameter("wheel_base_length", 0.275).value
 
         # DWA specific parameters
         self.n_v_omega = self.declare_parameter("dwa.n_v_omega", 25).value
@@ -55,7 +50,12 @@ class DWAAckermannNode(Node):
         self.obstacles_cost = self.declare_parameter("dwa.obstacles_cost", 0.005).value
         self.max_vel_cost = self.declare_parameter("dwa.max_vel_cost", 3.0).value
         self.min_vel_cost = self.declare_parameter("dwa.min_vel_cost", 0.0).value
-        
+        self.limit_angle = self.declare_parameter("dwa.limit_angle", 90).value
+        self.max_lidar_distance = self.declare_parameter('dwa.max_lidar_distance', 4.5).value
+        self.min_lidar_distance = self.declare_parameter('dwa.min_lidar_distance', 1.0).value
+        self.spread_gaussian = self.declare_parameter('dwa.spread_gaussian', 2.5).value
+        self.kp = self.declare_parameter('dwa.kp', 2.2).value
+        self.kd = self.declare_parameter('dwa.kd', 1.5).value        
         # use NumPy array for vectorized ops; empty shape (0,3) means no obstacles
         self.obstacles = np.zeros((0, 3), dtype=float)
 
@@ -263,7 +263,7 @@ class DWAAckermannNode(Node):
             cmd.drive.speed = 0.0
 
         # add a PD controller
-        error = math.atan2(chosen_omega * 0.33, chosen_v) if chosen_v != 0 else 0.0
+        error = math.atan2(chosen_omega * self.wheel_base_length, chosen_v) if chosen_v != 0 else 0.0
         p_controller = self.kp * error
         d_controller = self.kd * (error - self.last_error)
         cmd.drive.steering_angle = p_controller + d_controller
