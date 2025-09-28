@@ -21,14 +21,16 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='George_Halim',
+    maintainer='George Halim',
     maintainer_email='georgehany064@gmail.com',
-    description='TODO: Package description',
+    description='Python package for high speed overtaking',
     license='MIT',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            "bestFS_exe = best_first_search.best_first_search_node:main"
+            "bestFS_exe = best_first_search.best_first_search_node:main",
+            "potential_field_exe = potential_field.potential_field_node:main",
+            "dwa_exe = dynamic_window_approach.dwa:main"
         ],
     },
 )
