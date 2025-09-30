@@ -273,46 +273,6 @@ class DWAAckermannNode(Node):
         # log timings every N cycles conservatively
         self.get_logger().info(f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f}")
 
-
-    def load_path_from_csv(self, csv_path):
-        """
-        Load a racing path from a CSV file.
-
-        Expected CSV format: x, y, velocity (one point per line)
-
-        Args:
-            csv_path (str): Path to the CSV file containing waypoints
-
-        Returns:
-            list: List of (x, y, velocity) tuples representing the path
-
-        Raises:
-            FileNotFoundError: If the CSV file doesn't exist
-            ValueError: If the CSV format is incorrect
-        """
-        path = []
-        try:
-            with open(csv_path, newline='') as csvfile:
-                reader = csv.reader(csvfile)
-                for row in reader:
-                    if len(row) >= 3:
-                        x, y, v = float(row[0]), float(row[1]), float(row[2])
-                        path.append((x, y, v))
-                    else:
-                        self.get_logger().warn(
-                            f"Invalid CSV row format: {row}")
-        except FileNotFoundError:
-            self.get_logger().error(f"CSV file not found: {csv_path}")
-            return []
-        except Exception as e:
-            self.get_logger().error(f"Error loading CSV file: {e}")
-            return []
-
-        self.get_logger().info(
-            f"Loaded path from {csv_path} with {len(path)} points")
-        return path
-
-
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):
         m = Marker()
