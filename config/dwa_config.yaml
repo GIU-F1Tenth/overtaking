@@ -20,20 +20,20 @@ dwa_ackermann_node:
     # DWA params
     dwa:
       n_v_omega: 25
-      prediction_horizon: 10
-      omega_min: -2.0
-      omega_max: 2.0
+      prediction_horizon: 12
+      omega_min: -1.2
+      omega_max: 1.2
       v_min: 0.5
-      v_max: 7.5
+      v_max: 6.5
       integ_vel: 1.0
       dt: 0.2
       r_buffer: 0.1
-      obstacles_cost: 0.005
-      max_vel_cost: 3.0
-      min_vel_cost: 0.0
+      obstacles_cost: 0.01
+      max_vel_cost: 2.0
+      min_vel_cost: 1.0
       limit_angle: 90
       max_lidar_distance: 4.5
       min_lidar_distance: 1.0
-      spread_gaussian: 2.5
+      spread_gaussian: 2.0
       kp: 2.2
       kd: 1.5
