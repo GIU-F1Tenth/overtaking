@@ -42,7 +42,8 @@ class DWAAckermannNode(Node):
         self.omega_max = self.declare_parameter("dwa.omega_max", 2.0).value
         self.v_min = self.declare_parameter("dwa.v_min", 0.5).value
         self.v_max = self.declare_parameter("dwa.v_max", 7.5).value
-        self.integ_vel = self.declare_parameter("dwa.integ_vel", 1.0).value
+        self.integ_vel_scale = self.declare_parameter("dwa.integ_vel_scale", 1.0).value
+        self.integ_vel_scale_offset = self.declare_parameter("dwa.integ_vel_scale_offset", 0.0).value
         self.dt = self.declare_parameter("dwa.dt", 0.2).value
         self.r_buffer = self.declare_parameter("dwa.r_buffer", 0.1).value
         self.obstacles_cost = self.declare_parameter("dwa.obstacles_cost", 0.005).value
@@ -65,7 +66,7 @@ class DWAAckermannNode(Node):
         # Control
         self.last_error = 0.0
         self.opt_vel = 0.0
-        self.odom = None
+        self.odom = Odometry()
         self.lidar_cap = 0.0
         self.goal = [0.0, 0.0]  # in map frame (vehicle frame used by algorithm)
 
@@ -139,8 +140,9 @@ class DWAAckermannNode(Node):
         # Integrate forward for all trajectories in a vectorized loop over time steps
         for t in range(1, horizon + 1):
             prev = all_trajs[:, t - 1, :]
-            # integ_vel is scalar; same for each trajectory
-            all_trajs[:, t, :] = self._euler_integration_step(prev, self.integ_vel, omega_all)
+            # integ_vel_scale is factor for integration computation
+            integ_ = self.integ_vel_scale_offset + self.odom.twist.twist.linear.x / self.integ_vel_scale
+            all_trajs[:, t, :] = self._euler_integration_step(prev, integ_, omega_all)
 
         # Vectorized goal cost
         goal = np.array(self.goal)
@@ -223,8 +225,6 @@ class DWAAckermannNode(Node):
         self.odom = msg
 
     def compute_lidar_max_dist(self):
-        if not self.odom:
-            return 0.0
         linear_vel = self.odom.twist.twist.linear.x
         return np.clip(((linear_vel/self.v_max) * (self.max_lidar_distance - self.min_lidar_distance)) + self.min_lidar_distance, 
                       self.min_lidar_distance, self.max_lidar_distance)
