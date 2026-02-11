@@ -36,10 +36,11 @@ class DWAAckermannNode(Node):
         self.wheel_base_length = self.declare_parameter("wheel_base_length", 0.275).value
 
         # DWA specific parameters
-        self.n_v_omega = self.declare_parameter("dwa.n_v_omega", 25).value
+        self.n_v_omega_max = self.declare_parameter("dwa.n_v_omega_max", 25).value
+        self.n_v_omega_min = self.declare_parameter("dwa.n_v_omega_min", 15).value
         self.prediction_horizon = self.declare_parameter("dwa.prediction_horizon", 10).value
-        self.omega_min = self.declare_parameter("dwa.omega_min", -2.0).value
-        self.omega_max = self.declare_parameter("dwa.omega_max", 2.0).value
+        self.omega_max_full = self.declare_parameter("dwa.omega_max_full", 2.0).value
+        self.omega_max_min = self.declare_parameter("dwa.omega_max_min", 1.0).value
         self.v_min = self.declare_parameter("dwa.v_min", 0.5).value
         self.v_max = self.declare_parameter("dwa.v_max", 7.5).value
         self.integ_vel_scale = self.declare_parameter("dwa.integ_vel_scale", 1.0).value
@@ -70,8 +71,7 @@ class DWAAckermannNode(Node):
         self.lidar_cap = 0.0
         self.goal = [0.0, 0.0]  # in map frame (vehicle frame used by algorithm)
 
-        # Precompute omega grid (cheap) and keep v_all computed when used
-        self.omega_all = np.linspace(self.omega_min, self.omega_max, self.n_v_omega)
+        self.n_v_omega = 0
 
         # ROS interfaces
         self.create_subscription(PoseStamped, self.goal_topic, self.goal_cb, 10)
@@ -99,7 +99,7 @@ class DWAAckermannNode(Node):
         self.get_logger().info('Press "a" to drive. ESC to stop.')
         
         # Log loaded parameters
-        self.get_logger().info(f'DWA Parameters loaded: v_range=[{self.v_min}, {self.v_max}], omega_range=[{self.omega_min}, {self.omega_max}]')
+        # self.get_logger().info(f'DWA Parameters loaded: v_range=[{self.v_min}, {self.v_max}], omega_range=[{self.omega_min}, {self.omega_max}]')
 
     # ----------------- DWA Internal Logic -----------------
     def _euler_integration_step(self, prev, v, omega):
@@ -121,20 +121,61 @@ class DWAAckermannNode(Node):
         v_all = self.v_min + gaussian_weights * (self.v_max - self.v_min)
         return v_all
 
+    def compute_dynamic_omega_window(self):
+        """
+        Nonlinear 'Quadratic' shrinking of omega window based on velocity.
+
+        At v_min  -> omega = [-omega_max, omega_max]
+        At v_max  -> omega = [-omega_min, omega_min]
+        """
+        v = abs(self.odom.twist.twist.linear.x)
+
+        # Normalize velocity between 0 and 1
+        alpha = (v - self.v_min) / (self.v_max - self.v_min)
+        alpha = np.clip(alpha, 0.0, 1.0)
+
+        # Quadratic nonlinear shrink
+        shrink_factor = 1.0 - (1.0 - self.omega_max_min / self.omega_max_full) * (alpha ** 2)
+
+        omega_limit = self.omega_max_full * shrink_factor
+
+        return -omega_limit, omega_limit
+
+    def _compute_velocity_dependent_n_samples(self):
+        """
+        Nonlinear reduction of n_v_omega based on velocity.
+
+        At v_min  -> n_v_omega
+        At v_max  -> n_v_omega_min
+        """
+
+        v = abs(self.odom.twist.twist.linear.x)
+        alpha = (v - self.v_min) / (self.v_max - self.v_min)
+        alpha = np.clip(alpha, 0.0, 1.0)
+
+        n_max = self.n_v_omega_max
+        n_min = self.n_v_omega_min
+
+        n_dynamic = n_max - (n_max - n_min) * (alpha ** 2)
+
+        return int(max(n_min, round(n_dynamic)))
+
+
     def _run_dwa(self):
         """Fully vectorized DWA over all omegas and trajectory horizon.
         Returns: chosen_v, chosen_omega, chosen_idx, all_trajs (np.ndarray shape (n_omega, horizon+1, 3))"""
         start = time.perf_counter()
 
-        n_omega = self.n_v_omega
+        self.n_v_omega = self._compute_velocity_dependent_n_samples()
         horizon = self.prediction_horizon
 
         # prepare grids
-        omega_all = self.omega_all
+        omega_min, omega_max = self.compute_dynamic_omega_window()
+        omega_all = np.linspace(omega_min, omega_max, self.n_v_omega)
         v_all = self.compute_linear_vel()
 
         # Allocate trajectory array: (n_omega, horizon+1, 3)
-        all_trajs = np.zeros((n_omega, horizon + 1, 3), dtype=float)
+        all_trajs = np.zeros((self.n_v_omega, horizon + 1, 3), dtype=float)
         all_trajs[:, 0, :] = np.array([0.0, 0.0, 0.0])
 
         # Integrate forward for all trajectories in a vectorized loop over time steps
@@ -271,7 +312,7 @@ class DWAAckermannNode(Node):
         self.pub_cmd.publish(cmd)
 
         # log timings every N cycles conservatively
-        self.get_logger().info(f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f}")
+        # self.get_logger().info(f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f}")
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):

@@ -19,10 +19,11 @@ dwa_ackermann_node:
 
     # DWA params
     dwa:
-      n_v_omega: 25
+      n_v_omega_max: 25
+      n_v_omega_min: 10
       prediction_horizon: 8
-      omega_min: -2.0
-      omega_max: 2.0
+      omega_max_full: 2.0 # FULL omega window (low speed)
+      omega_max_min: 1.2 # MINIMUM omega window (high speed)
       v_min: 0.5
       v_max: 6.5
       integ_vel_scale: 5.8
