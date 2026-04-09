@@ -34,6 +34,7 @@ class DWAAckermannNode(Node):
         # General parameters
         self.laser_distance_from_base_link = self.declare_parameter("laser_distance_from_base_link", 0.275).value
         self.wheel_base_length = self.declare_parameter("wheel_base_length", 0.275).value
+        self.using_colored_horizons = self.declare_parameter("using_colored_horizons", True).value
 
         # DWA specific parameters
         self.n_v_omega_max = self.declare_parameter("dwa.n_v_omega_max", 25).value
@@ -48,6 +49,7 @@ class DWAAckermannNode(Node):
         self.dt = self.declare_parameter("dwa.dt", 0.2).value
         self.r_buffer = self.declare_parameter("dwa.r_buffer", 0.1).value
         self.obstacles_cost = self.declare_parameter("dwa.obstacles_cost", 0.005).value
+        self.goal_cost = self.declare_parameter("dwa.goal_cost", 1.0).value
         self.max_vel_cost = self.declare_parameter("dwa.max_vel_cost", 3.0).value
         self.min_vel_cost = self.declare_parameter("dwa.min_vel_cost", 0.0).value
         self.high_speed_sharp_traj_cost = self.declare_parameter("dwa.high_speed_sharp_traj_cost", 2.0).value
@@ -190,7 +192,7 @@ class DWAAckermannNode(Node):
         goal = np.array(self.goal)
         traj_xy = all_trajs[:, :, :2]  # (n_omega, horizon+1, 2)
         dists_to_goal = np.linalg.norm(traj_xy - goal[None, None, :], axis=2)  # (n_omega, horizon+1)
-        goal_costs = np.sum(dists_to_goal, axis=1)  # (n_omega,)
+        goal_costs = self.goal_cost * np.sum(dists_to_goal, axis=1)  # (n_omega,)
 
         # Vectorized obstacle cost
         if self.obstacles.shape[0] > 0:
@@ -216,7 +218,13 @@ class DWAAckermannNode(Node):
         chosen_idx = int(np.argmin(total_costs))
 
         self.dwa_time = (time.perf_counter() - start) * 1000
-        return float(min(v_all[chosen_idx], self.opt_vel)), float(omega_all[chosen_idx]), chosen_idx, all_trajs
+        return (
+            float(min(v_all[chosen_idx], self.opt_vel)),
+            float(omega_all[chosen_idx]),
+            chosen_idx,
+            all_trajs,
+            total_costs
+        )
 
     # ----------------- ROS Callbacks -----------------
     def goal_cb(self, msg: PoseStamped):
@@ -296,8 +304,12 @@ class DWAAckermannNode(Node):
             self.get_logger().warn(f"Transform not available: {e}")
 
     def control_loop(self):
-        chosen_v, chosen_omega, chosen_idx, all_trajs = self._run_dwa()
-        self.publish_horizon_markers(all_trajs, chosen_idx)
+        chosen_v, chosen_omega, chosen_idx, all_trajs, total_costs = self._run_dwa()
+
+        if self.using_colored_horizons:
+            self.publish_horizon_markers_colored(all_trajs, chosen_idx, total_costs)
+        else:
+            self.publish_horizon_markers(all_trajs, chosen_idx)
 
         cmd = AckermannDriveStamped()
         if self.vel:
@@ -349,6 +361,60 @@ class DWAAckermannNode(Node):
             for x, y, _ in traj:
                 m.points.append(Point(x=float(x), y=float(y), z=0.05))
             marker_array.markers.append(m)
+        self.horizon_pub.publish(marker_array)
+
+    def publish_horizon_markers_colored(self, all_trajs, chosen_idx, total_costs):
+        marker_array = MarkerArray()
+
+        # Clear previous markers first, important because n_omega changes over time
+        delete_marker = Marker()
+        delete_marker.action = Marker.DELETEALL
+        marker_array.markers.append(delete_marker)
+
+        n_omega = all_trajs.shape[0]
+
+        # Normalize costs to [0, 1]
+        c_min = float(np.min(total_costs))
+        c_max = float(np.max(total_costs))
+        if c_max - c_min < 1e-9:
+            normalized_costs = np.zeros_like(total_costs, dtype=float)
+        else:
+            normalized_costs = (total_costs - c_min) / (c_max - c_min)
+
+        for idx in range(n_omega):
+            traj = all_trajs[idx]
+            m = Marker()
+            m.header.frame_id = self.base_link_frame
+            m.header.stamp = self.get_clock().now().to_msg()
+            m.ns = "dwa_horizons"
+            m.id = int(idx)
+            m.type = Marker.LINE_STRIP
+            m.action = Marker.ADD
+
+            # Slightly thicker chosen trajectory
+            m.scale.x = 0.05 if idx == chosen_idx else 0.02
+
+            # Cost-based coloring:
+            # low cost  -> green
+            # high cost -> red
+            norm = float(normalized_costs[idx])
+            m.color.r = norm
+            m.color.g = 1.0 - norm
+            m.color.b = 0.0
+            m.color.a = 1.0 if idx == chosen_idx else 0.8
+
+            # Optional: make chosen one blue instead of cost-colored
+            # if idx == chosen_idx:
+            #     m.color.r = 0.0
+            #     m.color.g = 0.4
+            #     m.color.b = 1.0
+            #     m.color.a = 1.0
+
+            for x, y, _ in traj:
+                m.points.append(Point(x=float(x), y=float(y), z=0.05))
+
+            marker_array.markers.append(m)
+
         self.horizon_pub.publish(marker_array)
 
     # ----------------- Utilities -----------------

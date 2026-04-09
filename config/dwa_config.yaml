@@ -16,6 +16,7 @@ dwa_ackermann_node:
     # General parameters
     laser_distance_from_base_link: 0.275
     wheel_base_length: 0.33
+    using_colored_horizons: False
 
     # DWA params
     dwa:
@@ -26,11 +27,18 @@ dwa_ackermann_node:
       omega_max_min: 0.7 # MINIMUM omega window (high speed)
       v_min: 0.5
       v_max: 7.0
-      integ_vel_scale: 5.0
+      # The scale is needed to map the current velocity to the integration step. 
+      # Increse it and decrease the dt and it produces less curvy trajectories, 
+      # because x, y are multiplied by v and dt ,but not the theta it is multiplied directly by dt.
+      # The offset is the base value for the integration computation when v = 0.0.
+      integ_vel_scale: 5.0 
       integ_vel_scale_offset: 1.0
       dt: 0.15
       r_buffer: 0.3
+      # Changing the goal and obstacle parameters will NOT change the behavior of the algorithm 
+      # ,because these costs are applied to all trajectories so it is scaling of the cost itself not making a difference between a trajectory and another.
       obstacles_cost: 0.02
+      goal_cost: 0.1
       max_vel_cost: 5.0 # Max Cost for the rightmost and leftmost trajectories
       min_vel_cost: 1.0 # Min Cost for the rightmost and leftmost trajectories
       high_speed_sharp_traj_cost: 1.0 # Multiplier for velocity cost to penalize sharper trajectories at higher speeds
