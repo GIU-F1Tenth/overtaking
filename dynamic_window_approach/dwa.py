@@ -50,6 +50,7 @@ class DWAAckermannNode(Node):
         self.obstacles_cost = self.declare_parameter("dwa.obstacles_cost", 0.005).value
         self.max_vel_cost = self.declare_parameter("dwa.max_vel_cost", 3.0).value
         self.min_vel_cost = self.declare_parameter("dwa.min_vel_cost", 0.0).value
+        self.high_speed_sharp_traj_cost = self.declare_parameter("dwa.high_speed_sharp_traj_cost", 2.0).value
         self.limit_angle = self.declare_parameter("dwa.limit_angle", 90).value
         self.max_lidar_distance = self.declare_parameter('dwa.max_lidar_distance', 4.5).value
         self.min_lidar_distance = self.declare_parameter('dwa.min_lidar_distance', 1.0).value
@@ -208,6 +209,8 @@ class DWAAckermannNode(Node):
         # Velocity costs (vectorized)
         velocity_costs = (1 - (v_all - self.v_min) / (self.v_max - self.v_min)) * (
             self.max_vel_cost - self.min_vel_cost) + self.min_vel_cost
+
+        velocity_costs *= self.odom.twist.twist.linear.x * self.high_speed_sharp_traj_cost  # scale by velocity to penalize sharper turns at higher speeds
 
         total_costs = goal_costs + obs_costs + velocity_costs
         chosen_idx = int(np.argmin(total_costs))
