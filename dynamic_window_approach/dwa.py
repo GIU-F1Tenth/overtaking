@@ -34,20 +34,25 @@ class DWAAckermannNode(Node):
         # General parameters
         self.laser_distance_from_base_link = self.declare_parameter("laser_distance_from_base_link", 0.275).value
         self.wheel_base_length = self.declare_parameter("wheel_base_length", 0.275).value
+        self.using_colored_horizons = self.declare_parameter("using_colored_horizons", True).value
 
         # DWA specific parameters
-        self.n_v_omega = self.declare_parameter("dwa.n_v_omega", 25).value
+        self.n_v_omega_max = self.declare_parameter("dwa.n_v_omega_max", 25).value
+        self.n_v_omega_min = self.declare_parameter("dwa.n_v_omega_min", 15).value
         self.prediction_horizon = self.declare_parameter("dwa.prediction_horizon", 10).value
-        self.omega_min = self.declare_parameter("dwa.omega_min", -2.0).value
-        self.omega_max = self.declare_parameter("dwa.omega_max", 2.0).value
+        self.omega_max_full = self.declare_parameter("dwa.omega_max_full", 2.0).value
+        self.omega_max_min = self.declare_parameter("dwa.omega_max_min", 1.0).value
         self.v_min = self.declare_parameter("dwa.v_min", 0.5).value
         self.v_max = self.declare_parameter("dwa.v_max", 7.5).value
-        self.integ_vel = self.declare_parameter("dwa.integ_vel", 1.0).value
+        self.integ_vel_scale = self.declare_parameter("dwa.integ_vel_scale", 1.0).value
+        self.integ_vel_scale_offset = self.declare_parameter("dwa.integ_vel_scale_offset", 0.0).value
         self.dt = self.declare_parameter("dwa.dt", 0.2).value
         self.r_buffer = self.declare_parameter("dwa.r_buffer", 0.1).value
         self.obstacles_cost = self.declare_parameter("dwa.obstacles_cost", 0.005).value
+        self.goal_cost = self.declare_parameter("dwa.goal_cost", 1.0).value
         self.max_vel_cost = self.declare_parameter("dwa.max_vel_cost", 3.0).value
         self.min_vel_cost = self.declare_parameter("dwa.min_vel_cost", 0.0).value
+        self.high_speed_sharp_traj_cost = self.declare_parameter("dwa.high_speed_sharp_traj_cost", 2.0).value
         self.limit_angle = self.declare_parameter("dwa.limit_angle", 90).value
         self.max_lidar_distance = self.declare_parameter('dwa.max_lidar_distance', 4.5).value
         self.min_lidar_distance = self.declare_parameter('dwa.min_lidar_distance', 1.0).value
@@ -65,12 +70,11 @@ class DWAAckermannNode(Node):
         # Control
         self.last_error = 0.0
         self.opt_vel = 0.0
-        self.odom = None
+        self.odom = Odometry()
         self.lidar_cap = 0.0
         self.goal = [0.0, 0.0]  # in map frame (vehicle frame used by algorithm)
 
-        # Precompute omega grid (cheap) and keep v_all computed when used
-        self.omega_all = np.linspace(self.omega_min, self.omega_max, self.n_v_omega)
+        self.n_v_omega = 0
 
         # ROS interfaces
         self.create_subscription(PoseStamped, self.goal_topic, self.goal_cb, 10)
@@ -98,7 +102,7 @@ class DWAAckermannNode(Node):
         self.get_logger().info('Press "a" to drive. ESC to stop.')
         
         # Log loaded parameters
-        self.get_logger().info(f'DWA Parameters loaded: v_range=[{self.v_min}, {self.v_max}], omega_range=[{self.omega_min}, {self.omega_max}]')
+        # self.get_logger().info(f'DWA Parameters loaded: v_range=[{self.v_min}, {self.v_max}], omega_range=[{self.omega_min}, {self.omega_max}]')
 
     # ----------------- DWA Internal Logic -----------------
     def _euler_integration_step(self, prev, v, omega):
@@ -120,33 +124,75 @@ class DWAAckermannNode(Node):
         v_all = self.v_min + gaussian_weights * (self.v_max - self.v_min)
         return v_all
 
+    def compute_dynamic_omega_window(self):
+        """
+        Nonlinear 'Quadratic' shrinking of omega window based on velocity.
+
+        At v_min  -> omega = [-omega_max, omega_max]
+        At v_max  -> omega = [-omega_min, omega_min]
+        """
+        v = abs(self.odom.twist.twist.linear.x)
+
+        # Normalize velocity between 0 and 1
+        alpha = (v - self.v_min) / (self.v_max - self.v_min)
+        alpha = np.clip(alpha, 0.0, 1.0)
+
+        # Quadratic nonlinear shrink
+        shrink_factor = 1.0 - (1.0 - self.omega_max_min / self.omega_max_full) * (alpha ** 2)
+
+        omega_limit = self.omega_max_full * shrink_factor
+
+        return -omega_limit, omega_limit
+
+    def _compute_velocity_dependent_n_samples(self):
+        """
+        Nonlinear reduction of n_v_omega based on velocity.
+
+        At v_min  -> n_v_omega
+        At v_max  -> n_v_omega_min
+        """
+
+        v = abs(self.odom.twist.twist.linear.x)
+        alpha = (v - self.v_min) / (self.v_max - self.v_min)
+        alpha = np.clip(alpha, 0.0, 1.0)
+
+        n_max = self.n_v_omega_max
+        n_min = self.n_v_omega_min
+
+        n_dynamic = n_max - (n_max - n_min) * (alpha ** 2)
+
+        return int(max(n_min, round(n_dynamic)))
+
+
     def _run_dwa(self):
         """Fully vectorized DWA over all omegas and trajectory horizon.
         Returns: chosen_v, chosen_omega, chosen_idx, all_trajs (np.ndarray shape (n_omega, horizon+1, 3))"""
         start = time.perf_counter()
 
-        n_omega = self.n_v_omega
+        self.n_v_omega = self._compute_velocity_dependent_n_samples()
         horizon = self.prediction_horizon
 
         # prepare grids
-        omega_all = self.omega_all
+        omega_min, omega_max = self.compute_dynamic_omega_window()
+        omega_all = np.linspace(omega_min, omega_max, self.n_v_omega)
         v_all = self.compute_linear_vel()
 
         # Allocate trajectory array: (n_omega, horizon+1, 3)
-        all_trajs = np.zeros((n_omega, horizon + 1, 3), dtype=float)
+        all_trajs = np.zeros((self.n_v_omega, horizon + 1, 3), dtype=float)
         all_trajs[:, 0, :] = np.array([0.0, 0.0, 0.0])
 
         # Integrate forward for all trajectories in a vectorized loop over time steps
         for t in range(1, horizon + 1):
             prev = all_trajs[:, t - 1, :]
-            # integ_vel is scalar; same for each trajectory
-            all_trajs[:, t, :] = self._euler_integration_step(prev, self.integ_vel, omega_all)
+            # integ_vel_scale is factor for integration computation
+            integ_ = self.integ_vel_scale_offset + self.odom.twist.twist.linear.x / self.integ_vel_scale
+            all_trajs[:, t, :] = self._euler_integration_step(prev, integ_, omega_all)
 
         # Vectorized goal cost
         goal = np.array(self.goal)
         traj_xy = all_trajs[:, :, :2]  # (n_omega, horizon+1, 2)
         dists_to_goal = np.linalg.norm(traj_xy - goal[None, None, :], axis=2)  # (n_omega, horizon+1)
-        goal_costs = np.sum(dists_to_goal, axis=1)  # (n_omega,)
+        goal_costs = self.goal_cost * np.sum(dists_to_goal, axis=1)  # (n_omega,)
 
         # Vectorized obstacle cost
         if self.obstacles.shape[0] > 0:
@@ -166,11 +212,19 @@ class DWAAckermannNode(Node):
         velocity_costs = (1 - (v_all - self.v_min) / (self.v_max - self.v_min)) * (
             self.max_vel_cost - self.min_vel_cost) + self.min_vel_cost
 
+        velocity_costs *= self.odom.twist.twist.linear.x * self.high_speed_sharp_traj_cost  # scale by velocity to penalize sharper turns at higher speeds
+
         total_costs = goal_costs + obs_costs + velocity_costs
         chosen_idx = int(np.argmin(total_costs))
 
         self.dwa_time = (time.perf_counter() - start) * 1000
-        return float(min(v_all[chosen_idx], self.opt_vel)), float(omega_all[chosen_idx]), chosen_idx, all_trajs
+        return (
+            float(min(v_all[chosen_idx], self.opt_vel)),
+            float(omega_all[chosen_idx]),
+            chosen_idx,
+            all_trajs,
+            total_costs
+        )
 
     # ----------------- ROS Callbacks -----------------
     def goal_cb(self, msg: PoseStamped):
@@ -223,8 +277,6 @@ class DWAAckermannNode(Node):
         self.odom = msg
 
     def compute_lidar_max_dist(self):
-        if not self.odom:
-            return 0.0
         linear_vel = self.odom.twist.twist.linear.x
         return np.clip(((linear_vel/self.v_max) * (self.max_lidar_distance - self.min_lidar_distance)) + self.min_lidar_distance, 
                       self.min_lidar_distance, self.max_lidar_distance)
@@ -252,8 +304,12 @@ class DWAAckermannNode(Node):
             self.get_logger().warn(f"Transform not available: {e}")
 
     def control_loop(self):
-        chosen_v, chosen_omega, chosen_idx, all_trajs = self._run_dwa()
-        self.publish_horizon_markers(all_trajs, chosen_idx)
+        chosen_v, chosen_omega, chosen_idx, all_trajs, total_costs = self._run_dwa()
+
+        if self.using_colored_horizons:
+            self.publish_horizon_markers_colored(all_trajs, chosen_idx, total_costs)
+        else:
+            self.publish_horizon_markers(all_trajs, chosen_idx)
 
         cmd = AckermannDriveStamped()
         if self.vel:
@@ -271,7 +327,7 @@ class DWAAckermannNode(Node):
         self.pub_cmd.publish(cmd)
 
         # log timings every N cycles conservatively
-        self.get_logger().info(f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f}")
+        # self.get_logger().info(f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f}")
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):
@@ -305,6 +361,60 @@ class DWAAckermannNode(Node):
             for x, y, _ in traj:
                 m.points.append(Point(x=float(x), y=float(y), z=0.05))
             marker_array.markers.append(m)
+        self.horizon_pub.publish(marker_array)
+
+    def publish_horizon_markers_colored(self, all_trajs, chosen_idx, total_costs):
+        marker_array = MarkerArray()
+
+        # Clear previous markers first, important because n_omega changes over time
+        delete_marker = Marker()
+        delete_marker.action = Marker.DELETEALL
+        marker_array.markers.append(delete_marker)
+
+        n_omega = all_trajs.shape[0]
+
+        # Normalize costs to [0, 1]
+        c_min = float(np.min(total_costs))
+        c_max = float(np.max(total_costs))
+        if c_max - c_min < 1e-9:
+            normalized_costs = np.zeros_like(total_costs, dtype=float)
+        else:
+            normalized_costs = (total_costs - c_min) / (c_max - c_min)
+
+        for idx in range(n_omega):
+            traj = all_trajs[idx]
+            m = Marker()
+            m.header.frame_id = self.base_link_frame
+            m.header.stamp = self.get_clock().now().to_msg()
+            m.ns = "dwa_horizons"
+            m.id = int(idx)
+            m.type = Marker.LINE_STRIP
+            m.action = Marker.ADD
+
+            # Slightly thicker chosen trajectory
+            m.scale.x = 0.05 if idx == chosen_idx else 0.02
+
+            # Cost-based coloring:
+            # low cost  -> green
+            # high cost -> red
+            norm = float(normalized_costs[idx])
+            m.color.r = norm
+            m.color.g = 1.0 - norm
+            m.color.b = 0.0
+            m.color.a = 1.0 if idx == chosen_idx else 0.8
+
+            # Optional: make chosen one blue instead of cost-colored
+            # if idx == chosen_idx:
+            #     m.color.r = 0.0
+            #     m.color.g = 0.4
+            #     m.color.b = 1.0
+            #     m.color.a = 1.0
+
+            for x, y, _ in traj:
+                m.points.append(Point(x=float(x), y=float(y), z=0.05))
+
+            marker_array.markers.append(m)
+
         self.horizon_pub.publish(marker_array)
 
     # ----------------- Utilities -----------------
