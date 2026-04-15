@@ -166,7 +166,8 @@ class DWAAckermannNode(Node):
 
     def _run_dwa(self):
         """Fully vectorized DWA over all omegas and trajectory horizon.
-        Returns: chosen_v, chosen_omega, chosen_idx, all_trajs (np.ndarray shape (n_omega, horizon+1, 3))"""
+        Returns: chosen_v, chosen_omega, chosen_idx, closest_traj_idx,
+        all_trajs (np.ndarray shape (n_omega, horizon+1, 3))"""
         start = time.perf_counter()
 
         self.n_v_omega = self._compute_velocity_dependent_n_samples()
@@ -192,7 +193,10 @@ class DWAAckermannNode(Node):
         goal = np.array(self.goal)
         traj_xy = all_trajs[:, :, :2]  # (n_omega, horizon+1, 2)
         dists_to_goal = np.linalg.norm(traj_xy - goal[None, None, :], axis=2)  # (n_omega, horizon+1)
-        goal_costs = self.goal_cost * np.sum(dists_to_goal, axis=1)  # (n_omega,)
+        min_goal_dists = np.min(dists_to_goal, axis=1)  # (n_omega,)
+        goal_costs = self.goal_cost * np.sum(dists_to_goal, axis=1)  # closer to goal = lower cost
+        closest_traj_idx = int(np.argmin(min_goal_dists))
+        # goal_costs[closest_traj_idx] -= 1 / max(self.odom.twist.twist.linear.x, 0.01)  # small bonus for trajectories that get closer to the goal, scaled by velocity
 
         # Vectorized obstacle cost
         if self.obstacles.shape[0] > 0:
@@ -202,7 +206,7 @@ class DWAAckermannNode(Node):
             # Broadcast differences: (n_omega, horizon+1, M, 2)
             diff = traj_xy[:, :, None, :] - obs_xy[None, None, :, :]
             dists = np.linalg.norm(diff, axis=3) - obs_r[None, None, :]
-            dists = np.maximum(dists, 0.001)
+            dists = np.maximum(dists, 0.01)
             inv_dists = self.obstacles_cost / dists
             obs_costs = np.sum(inv_dists, axis=(1, 2))  # sum over time and obstacles -> (n_omega,)
         else:
@@ -222,6 +226,7 @@ class DWAAckermannNode(Node):
             float(min(v_all[chosen_idx], self.opt_vel)),
             float(omega_all[chosen_idx]),
             chosen_idx,
+            closest_traj_idx,
             all_trajs,
             total_costs
         )
@@ -304,12 +309,12 @@ class DWAAckermannNode(Node):
             self.get_logger().warn(f"Transform not available: {e}")
 
     def control_loop(self):
-        chosen_v, chosen_omega, chosen_idx, all_trajs, total_costs = self._run_dwa()
+        chosen_v, chosen_omega, chosen_idx, closest_traj_idx, all_trajs, total_costs = self._run_dwa()
 
         if self.using_colored_horizons:
-            self.publish_horizon_markers_colored(all_trajs, chosen_idx, total_costs)
+            self.publish_horizon_markers_colored(all_trajs, chosen_idx, closest_traj_idx, total_costs)
         else:
-            self.publish_horizon_markers(all_trajs, chosen_idx)
+            self.publish_horizon_markers(all_trajs, chosen_idx, closest_traj_idx)
 
         cmd = AckermannDriveStamped()
         if self.vel:
@@ -341,7 +346,7 @@ class DWAAckermannNode(Node):
         m.color.a, m.color.r = 1.0, 1.0
         self.goal_marker_pub.publish(m)
 
-    def publish_horizon_markers(self, all_trajs, chosen_idx):
+    def publish_horizon_markers(self, all_trajs, chosen_idx, closest_traj_idx):
         marker_array = MarkerArray()
         # all_trajs may be numpy array shape (n_omega, horizon+1, 3)
         n_omega = all_trajs.shape[0]
@@ -352,18 +357,22 @@ class DWAAckermannNode(Node):
             m.header.stamp = self.get_clock().now().to_msg()
             m.ns, m.id = "dwa_horizons", int(idx)
             m.type, m.action = Marker.LINE_STRIP, Marker.ADD
-            m.scale.x = 0.02
-            if idx == chosen_idx:
+            m.scale.x = 0.05 if idx == chosen_idx else 0.02
+            if idx == closest_traj_idx:
+                m.color.r = 0.6
+                m.color.g = 0.0
+                m.color.b = 0.8
+            elif idx == chosen_idx:
                 m.color.r = 1.0
             else:
                 m.color.g, m.color.b = 0.5, 1.0
-            m.color.a = 0.8
+            m.color.a = 1.0 if idx in (chosen_idx, closest_traj_idx) else 0.8
             for x, y, _ in traj:
                 m.points.append(Point(x=float(x), y=float(y), z=0.05))
             marker_array.markers.append(m)
         self.horizon_pub.publish(marker_array)
 
-    def publish_horizon_markers_colored(self, all_trajs, chosen_idx, total_costs):
+    def publish_horizon_markers_colored(self, all_trajs, chosen_idx, closest_traj_idx, total_costs):
         marker_array = MarkerArray()
 
         # Clear previous markers first, important because n_omega changes over time
@@ -394,14 +403,20 @@ class DWAAckermannNode(Node):
             # Slightly thicker chosen trajectory
             m.scale.x = 0.05 if idx == chosen_idx else 0.02
 
-            # Cost-based coloring:
-            # low cost  -> green
-            # high cost -> red
-            norm = float(normalized_costs[idx])
-            m.color.r = norm
-            m.color.g = 1.0 - norm
-            m.color.b = 0.0
-            m.color.a = 1.0 if idx == chosen_idx else 0.8
+            if idx == closest_traj_idx:
+                m.color.r = 0.6
+                m.color.g = 0.0
+                m.color.b = 0.8
+                m.color.a = 1.0
+            else:
+                # Cost-based coloring:
+                # low cost  -> green
+                # high cost -> red
+                norm = float(normalized_costs[idx])
+                m.color.r = norm
+                m.color.g = 1.0 - norm
+                m.color.b = 0.0
+                m.color.a = 1.0 if idx == chosen_idx else 0.8
 
             # Optional: make chosen one blue instead of cost-colored
             # if idx == chosen_idx:
