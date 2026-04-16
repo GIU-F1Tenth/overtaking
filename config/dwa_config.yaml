@@ -16,7 +16,7 @@ dwa_ackermann_node:
     # General parameters
     laser_distance_from_base_link: 0.275
     wheel_base_length: 0.33
-    using_colored_horizons: True
+    using_colored_horizons: false 
 
     # DWA params
     dwa:
@@ -25,7 +25,7 @@ dwa_ackermann_node:
       prediction_horizon: 8
       omega_max_full: 2.0 # FULL omega window (low speed)
       omega_max_min: 0.7 # MINIMUM omega window (high speed)
-      v_min: 0.5
+      v_min: 1.0
       v_max: 5.0
       # The scale is needed to map the current velocity to the integration step. 
       # Increse it and decrease the dt and it produces less curvy trajectories, 

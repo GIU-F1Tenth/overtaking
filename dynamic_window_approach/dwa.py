@@ -196,7 +196,8 @@ class DWAAckermannNode(Node):
         min_goal_dists = np.min(dists_to_goal, axis=1)  # (n_omega,)
         goal_costs = self.goal_cost * np.sum(dists_to_goal, axis=1)  # closer to goal = lower cost
         closest_traj_idx = int(np.argmin(min_goal_dists))
-        # goal_costs[closest_traj_idx] -= 1 / max(self.odom.twist.twist.linear.x, 0.01)  # small bonus for trajectories that get closer to the goal, scaled by velocity
+        vel_scale = 1.0 - np.clip(self.odom.twist.twist.linear.x / self.v_max, 0.0, 1.0)
+        goal_costs[closest_traj_idx] -= self.goal_cost * vel_scale # bonus for trajectory that gets closest to the goal, scaled by current velocity (encourages following the goal at low speeds, more freedom at high speeds)
 
         # Vectorized obstacle cost
         if self.obstacles.shape[0] > 0:
@@ -348,6 +349,10 @@ class DWAAckermannNode(Node):
 
     def publish_horizon_markers(self, all_trajs, chosen_idx, closest_traj_idx):
         marker_array = MarkerArray()
+        delete_marker = Marker()
+        delete_marker.action = Marker.DELETEALL
+        marker_array.markers.append(delete_marker)
+        
         # all_trajs may be numpy array shape (n_omega, horizon+1, 3)
         n_omega = all_trajs.shape[0]
         for idx in range(n_omega):
