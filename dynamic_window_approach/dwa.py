@@ -75,6 +75,9 @@ class DWAAckermannNode(Node):
         self.goal = [0.0, 0.0]  # in map frame (vehicle frame used by algorithm)
 
         self.n_v_omega = 0
+        self._all_trajs_buffer = np.zeros(
+            (self.n_v_omega_max, self.prediction_horizon + 1, 3), dtype=float
+        )
 
         # ROS interfaces
         self.create_subscription(PoseStamped, self.goal_topic, self.goal_cb, 10)
@@ -103,6 +106,8 @@ class DWAAckermannNode(Node):
         
         # Log loaded parameters
         # self.get_logger().info(f'DWA Parameters loaded: v_range=[{self.v_min}, {self.v_max}], omega_range=[{self.omega_min}, {self.omega_max}]')
+        self.max_dwa_time = 0.0
+        self.max_scan_time = 0.0
 
     # ----------------- DWA Internal Logic -----------------
     def _euler_integration_step(self, prev, v, omega):
@@ -178,9 +183,9 @@ class DWAAckermannNode(Node):
         omega_all = np.linspace(omega_min, omega_max, self.n_v_omega)
         v_all = self.compute_linear_vel()
 
-        # Allocate trajectory array: (n_omega, horizon+1, 3)
-        all_trajs = np.zeros((self.n_v_omega, horizon + 1, 3), dtype=float)
-        all_trajs[:, 0, :] = np.array([0.0, 0.0, 0.0])
+        # Reuse a preallocated workspace to avoid per-cycle trajectory allocations.
+        all_trajs = self._all_trajs_buffer[:self.n_v_omega, : horizon + 1, :]
+        all_trajs.fill(0.0)
 
         # Integrate forward for all trajectories in a vectorized loop over time steps
         for t in range(1, horizon + 1):
@@ -258,22 +263,16 @@ class DWAAckermannNode(Node):
         angles = angles[mask]
         ranges = ranges[mask]
 
-        # collect points in a Python list then convert once to numpy -> cheaper than frequent np.array([...]) calls
-        points = []
-        cos = np.cos(angles)
-        sin = np.sin(angles)
-
         lidar_capping_distance = self.compute_lidar_max_dist()
         self.lidar_cap = lidar_capping_distance
-        # vectorized mask already applied; now filter by distance and append
-        for r, c, s in zip(ranges, cos, sin):
-            if r <= lidar_capping_distance:
-                lx = r * c
-                ly = r * s
-                points.append((lx, ly, self.r_buffer))
-
-        if points:
-            self.obstacles = np.asarray(points, dtype=float)
+        distance_mask = ranges <= lidar_capping_distance
+        if np.any(distance_mask):
+            capped_ranges = ranges[distance_mask]
+            capped_angles = angles[distance_mask]
+            obs_x = capped_ranges * np.cos(capped_angles)
+            obs_y = capped_ranges * np.sin(capped_angles)
+            obs_r = np.full(obs_x.shape, self.r_buffer, dtype=float)
+            self.obstacles = np.column_stack((obs_x, obs_y, obs_r))
         else:
             self.obstacles = np.zeros((0, 3), dtype=float)
 
@@ -332,8 +331,10 @@ class DWAAckermannNode(Node):
 
         self.pub_cmd.publish(cmd)
 
+        self.max_dwa_time = max(self.dwa_time, self.max_dwa_time)
+        self.max_scan_time = max(self.max_scan_time, self.scan_time)
         # log timings every N cycles conservatively
-        # self.get_logger().info(f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f}")
+        self.get_logger().info(f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f} (max DWA: {self.max_dwa_time:.3f} ms, max scan: {self.max_scan_time:.3f} ms)")
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):

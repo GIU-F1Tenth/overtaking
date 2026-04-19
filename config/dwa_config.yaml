@@ -27,7 +27,7 @@ dwa_ackermann_node:
       omega_max_min: 0.7 # MINIMUM omega window (high speed)
       v_min: 1.0 # Vehicle's actual minimum velocity.
       v_max: 5.0 # Vehicle's actual maximum velocity.
-      
+
       # The scale is needed to map the current velocity to the integration step. 
       # Increse it and decrease the dt and it produces less curvy trajectories, 
       # because x, y are multiplied by v and dt ,but not the theta it is multiplied directly by dt.
