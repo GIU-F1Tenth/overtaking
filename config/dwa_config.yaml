@@ -17,35 +17,34 @@ dwa_ackermann_node:
     # General parameters
     laser_distance_from_base_link: 0.275
     wheel_base_length: 0.33
-    using_colored_horizons: False
+    using_colored_horizons: true 
 
     # DWA params
     dwa:
-      n_v_omega_max: 25
-      n_v_omega_min: 8
-      prediction_horizon: 8
+      n_v_omega_max: 25 # Maximum number of (v, omega) pairs to evaluate. Increase this value to get smoother trajectories but it will increase the computation time.
+      n_v_omega_min: 8 # Minimum number of (v, omega) pairs to evaluate.
+      prediction_horizon: 8 # Number of steps to predict for each (v, omega) pair. Increase this value to get more future simulations. It will increase the computation time.
       omega_max_full: 2.0 # FULL omega window (low speed)
       omega_max_min: 0.7 # MINIMUM omega window (high speed)
-      v_min: 0.5
-      v_max: 7.0
+      v_min: 1.0 # Vehicle's actual minimum velocity.
+      v_max: 5.0 # Vehicle's actual maximum velocity.
+
       # The scale is needed to map the current velocity to the integration step. 
       # Increse it and decrease the dt and it produces less curvy trajectories, 
       # because x, y are multiplied by v and dt ,but not the theta it is multiplied directly by dt.
       # The offset is the base value for the integration computation when v = 0.0.
-      integ_vel_scale: 5.0 
-      integ_vel_scale_offset: 1.0
+      integ_vel_scale: 4.5 # Scale for the velocity in the integration step computation. Increase this value to get less curvy trajectories at higher speeds.
+      integ_vel_scale_offset: 0.7 # Offset for the velocity in the integration step computation.
       dt: 0.15
-      r_buffer: 0.3
-      # Changing the goal and obstacle parameters will NOT change the behavior of the algorithm 
-      # ,because these costs are applied to all trajectories so it is scaling of the cost itself not making a difference between a trajectory and another.
+      r_buffer: 0.2
       obstacles_cost: 0.02
-      goal_cost: 0.1
-      max_vel_cost: 5.0 # Max Cost for the rightmost and leftmost trajectories
-      min_vel_cost: 1.0 # Min Cost for the rightmost and leftmost trajectories
-      high_speed_sharp_traj_cost: 1.0 # Multiplier for velocity cost to penalize sharper trajectories at higher speeds
-      limit_angle: 120
+      goal_cost: 10.0 # Changing the goal parameter will reduce the cost of the closest trajectory to the goal  
+      max_vel_cost: 30.0 # Max Cost for the rightmost and leftmost trajectories
+      min_vel_cost: 10.0 # Min Cost for the rightmost and leftmost trajectories
+      high_speed_sharp_traj_cost: 1.4 # Multiplier for velocity cost to penalize sharper trajectories at higher speeds. Increase it to penalize sharper trajectories more at higher speeds.
+      limit_angle: 120 # The limit angle such that after ± this angle the obstacles are not considered for collision checking.
       max_lidar_distance: 10.0 # Between these distances, we consider the lidar points for collision checking. 
       min_lidar_distance: 2.0 # To avoid considering far away points that are not relevant for collision checking.
       spread_gaussian: 2.0 # For computing linear velocities for each omega
       kp: 1.8
-      kd: 1.5
+      kd: 1.2
