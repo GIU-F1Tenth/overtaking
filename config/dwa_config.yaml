@@ -9,9 +9,10 @@ dwa_ackermann_node:
     odom_topic: "/ego_racecar/odom"
     lookahead_sub_topic: "lookahead_goal"
     goal_topic: "/goal_pose"
-    drive_topic: "/drive"
+    drive_topic: "/dwa/drive"
     goal_marker_topic: "goal_marker"
     horizon_marker_topic: "dwa_horizons"
+    start_topic: "/control_selector"
 
     # General parameters
     laser_distance_from_base_link: 0.275
