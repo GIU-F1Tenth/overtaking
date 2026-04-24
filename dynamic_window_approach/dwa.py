@@ -231,12 +231,16 @@ class DWAAckermannNode(Node):
         # Vectorized goal cost
         goal = np.array(self.goal)
         traj_xy = all_trajs[:, :, :2]  # (n_omega, horizon+1, 2)
-        dists_to_goal = np.linalg.norm(traj_xy - goal[None, None, :], axis=2)  # (n_omega, horizon+1)
+        dists_to_goal = np.linalg.norm(
+            traj_xy - goal[None, None, :], axis=2)  # (n_omega, horizon+1)
         min_goal_dists = np.min(dists_to_goal, axis=1)  # (n_omega,)
-        goal_costs = self.goal_cost * np.sum(dists_to_goal, axis=1)  # closer to goal = lower cost
+        # closer to goal = lower cost
+        goal_costs = self.goal_cost * np.sum(dists_to_goal, axis=1)
         closest_traj_idx = int(np.argmin(min_goal_dists))
-        vel_scale = 1.0 - np.clip(self.odom.twist.twist.linear.x / self.v_max, 0.0, 1.0)
-        goal_costs[closest_traj_idx] -= self.goal_cost * vel_scale # bonus for trajectory that gets closest to the goal, scaled by current velocity (encourages following the goal at low speeds, more freedom at high speeds)
+        vel_scale = 1.0 - \
+            np.clip(self.odom.twist.twist.linear.x / self.v_max, 0.0, 1.0)
+        # bonus for trajectory that gets closest to the goal, scaled by current velocity (encourages following the goal at low speeds, more freedom at high speeds)
+        goal_costs[closest_traj_idx] -= self.goal_cost * vel_scale
 
         # Vectorized obstacle cost
         if self.obstacles.shape[0] > 0:
@@ -326,6 +330,8 @@ class DWAAckermannNode(Node):
                        self.min_lidar_distance, self.max_lidar_distance)
 
     def get_pose(self):
+        if not self.vel:
+            return
         try:
             now = rclpy.time.Time()
             transform = self.tf_buffer.lookup_transform(
@@ -351,12 +357,16 @@ class DWAAckermannNode(Node):
             self.get_logger().warn(f"Transform not available: {e}")
 
     def control_loop(self):
+        if not self.vel:
+            return
         chosen_v, chosen_omega, chosen_idx, closest_traj_idx, all_trajs, total_costs = self._run_dwa()
 
         if self.using_colored_horizons:
-            self.publish_horizon_markers_colored(all_trajs, chosen_idx, closest_traj_idx, total_costs)
+            self.publish_horizon_markers_colored(
+                all_trajs, chosen_idx, closest_traj_idx, total_costs)
         else:
-            self.publish_horizon_markers(all_trajs, chosen_idx, closest_traj_idx)
+            self.publish_horizon_markers(
+                all_trajs, chosen_idx, closest_traj_idx)
 
         cmd = AckermannDriveStamped()
         if self.vel:
@@ -378,7 +388,8 @@ class DWAAckermannNode(Node):
         self.max_dwa_time = max(self.dwa_time, self.max_dwa_time)
         self.max_scan_time = max(self.max_scan_time, self.scan_time)
         # log timings every N cycles conservatively
-        self.get_logger().info(f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f} (max DWA: {self.max_dwa_time:.3f} ms, max scan: {self.max_scan_time:.3f} ms)")
+        self.get_logger().info(
+            f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f} (max DWA: {self.max_dwa_time:.3f} ms, max scan: {self.max_scan_time:.3f} ms)", throttle_duration_sec=1.0)
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):
@@ -397,7 +408,7 @@ class DWAAckermannNode(Node):
         delete_marker = Marker()
         delete_marker.action = Marker.DELETEALL
         marker_array.markers.append(delete_marker)
-        
+
         # all_trajs may be numpy array shape (n_omega, horizon+1, 3)
         n_omega = all_trajs.shape[0]
         for idx in range(n_omega):
