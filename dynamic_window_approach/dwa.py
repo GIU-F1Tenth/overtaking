@@ -523,10 +523,8 @@ class DWAAckermannNode(Node):
     def start_cb(self, msg: String):
         if msg.data == "dwa":
             self.vel = True
-            self.get_logger().info("DWA started.")
         else:
             self.vel = False
-            self.get_logger().info("DWA stopped.")
 
 
 def main(args=None):
