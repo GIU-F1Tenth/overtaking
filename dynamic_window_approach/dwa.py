@@ -251,7 +251,7 @@ class DWAAckermannNode(Node):
             diff = traj_xy[:, :, None, :] - obs_xy[None, None, :, :]
             dists = np.linalg.norm(diff, axis=3) - obs_r[None, None, :]
             dists = np.maximum(dists, 0.01)
-            inv_dists = self.obstacles_cost / dists
+            inv_dists = self.obstacles_cost / dists**2
             # sum over time and obstacles -> (n_omega,)
             obs_costs = np.sum(inv_dists, axis=(1, 2))
         else:
@@ -361,12 +361,12 @@ class DWAAckermannNode(Node):
             return
         chosen_v, chosen_omega, chosen_idx, closest_traj_idx, all_trajs, total_costs = self._run_dwa()
 
-        if self.using_colored_horizons:
-            self.publish_horizon_markers_colored(
-                all_trajs, chosen_idx, closest_traj_idx, total_costs)
-        else:
-            self.publish_horizon_markers(
-                all_trajs, chosen_idx, closest_traj_idx)
+        # if self.using_colored_horizons:
+        #     self.publish_horizon_markers_colored(
+        #         all_trajs, chosen_idx, closest_traj_idx, total_costs)
+        # else:
+        #     self.publish_horizon_markers(
+        #         all_trajs, chosen_idx, closest_traj_idx)
 
         cmd = AckermannDriveStamped()
         if self.vel:
@@ -388,8 +388,8 @@ class DWAAckermannNode(Node):
         self.max_dwa_time = max(self.dwa_time, self.max_dwa_time)
         self.max_scan_time = max(self.max_scan_time, self.scan_time)
         # log timings every N cycles conservatively
-        self.get_logger().info(
-            f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f} (max DWA: {self.max_dwa_time:.3f} ms, max scan: {self.max_scan_time:.3f} ms)", throttle_duration_sec=1.0)
+        # self.get_logger().info(
+        #     f"DWA time: {self.dwa_time:.3f} ms, scan time: {self.scan_time:.3f} ms, chosen vel: {chosen_v:.2f}, lidar_cap: {self.lidar_cap:.2f} (max DWA: {self.max_dwa_time:.3f} ms, max scan: {self.max_scan_time:.3f} ms)", throttle_duration_sec=1.0)
 
     # ----------------- Visualization -----------------
     def publish_goal_marker(self, x, y):
