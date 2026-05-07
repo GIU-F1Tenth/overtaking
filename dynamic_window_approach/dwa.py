@@ -20,71 +20,80 @@ class DWAAckermannNode(Node):
 
         # Frame parameters
         self.base_link_frame = self.declare_parameter(
-            "base_link", "ego_racecar/base_link").value
+            "base_link", "ego_racecar/base_link"
+        ).value
         self.map_frame = self.declare_parameter("map_frame", "map").value
 
         # Topic parameters
         self.scan_topic = self.declare_parameter("scan_topic", "/scan").value
         self.odom_topic = self.declare_parameter(
-            'odom_topic', '/ego_racecar/odom').value
+            "odom_topic", "/ego_racecar/odom"
+        ).value
+        self.fused_odom_topic = self.declare_parameter(
+            "fused_odom_topic", "/fused_odometry"
+        ).value
         self.lookahead_sub_topic = self.declare_parameter(
-            "lookahead_sub_topic", "lookahead_goal").value
-        self.goal_topic = self.declare_parameter(
-            "goal_topic", "/goal_pose").value
-        self.drive_topic = self.declare_parameter(
-            "drive_topic", "/drive").value
+            "lookahead_sub_topic", "lookahead_goal"
+        ).value
+        self.goal_topic = self.declare_parameter("goal_topic", "/goal_pose").value
+        self.drive_topic = self.declare_parameter("drive_topic", "/drive").value
         self.goal_marker_topic = self.declare_parameter(
-            "goal_marker_topic", "goal_marker").value
+            "goal_marker_topic", "goal_marker"
+        ).value
         self.horizon_marker_topic = self.declare_parameter(
-            "horizon_marker_topic", "dwa_horizons").value
+            "horizon_marker_topic", "dwa_horizons"
+        ).value
         self.start_topic = self.declare_parameter(
-            "start_topic", "/control_selector").value
+            "start_topic", "/control_selector"
+        ).value
+        self.use_fused_odometry = self.declare_parameter(
+            "use_fused_odometry", True
+        ).value
 
         # General parameters
         self.laser_distance_from_base_link = self.declare_parameter(
-            "laser_distance_from_base_link", 0.275).value
+            "laser_distance_from_base_link", 0.275
+        ).value
         self.wheel_base_length = self.declare_parameter(
-            "wheel_base_length", 0.275).value
+            "wheel_base_length", 0.275
+        ).value
         self.using_colored_horizons = self.declare_parameter(
-            "using_colored_horizons", True).value
+            "using_colored_horizons", True
+        ).value
 
         # DWA specific parameters
-        self.n_v_omega_max = self.declare_parameter(
-            "dwa.n_v_omega_max", 25).value
-        self.n_v_omega_min = self.declare_parameter(
-            "dwa.n_v_omega_min", 15).value
+        self.n_v_omega_max = self.declare_parameter("dwa.n_v_omega_max", 25).value
+        self.n_v_omega_min = self.declare_parameter("dwa.n_v_omega_min", 15).value
         self.prediction_horizon = self.declare_parameter(
-            "dwa.prediction_horizon", 10).value
-        self.omega_max_full = self.declare_parameter(
-            "dwa.omega_max_full", 2.0).value
-        self.omega_max_min = self.declare_parameter(
-            "dwa.omega_max_min", 1.0).value
+            "dwa.prediction_horizon", 10
+        ).value
+        self.omega_max_full = self.declare_parameter("dwa.omega_max_full", 2.0).value
+        self.omega_max_min = self.declare_parameter("dwa.omega_max_min", 1.0).value
         self.v_min = self.declare_parameter("dwa.v_min", 0.5).value
         self.v_max = self.declare_parameter("dwa.v_max", 7.5).value
-        self.integ_vel_scale = self.declare_parameter(
-            "dwa.integ_vel_scale", 1.0).value
+        self.integ_vel_scale = self.declare_parameter("dwa.integ_vel_scale", 1.0).value
         self.integ_vel_scale_offset = self.declare_parameter(
-            "dwa.integ_vel_scale_offset", 0.0).value
+            "dwa.integ_vel_scale_offset", 0.0
+        ).value
         self.dt = self.declare_parameter("dwa.dt", 0.2).value
         self.r_buffer = self.declare_parameter("dwa.r_buffer", 0.1).value
-        self.obstacles_cost = self.declare_parameter(
-            "dwa.obstacles_cost", 0.005).value
+        self.obstacles_cost = self.declare_parameter("dwa.obstacles_cost", 0.005).value
         self.goal_cost = self.declare_parameter("dwa.goal_cost", 1.0).value
-        self.max_vel_cost = self.declare_parameter(
-            "dwa.max_vel_cost", 3.0).value
-        self.min_vel_cost = self.declare_parameter(
-            "dwa.min_vel_cost", 0.0).value
+        self.max_vel_cost = self.declare_parameter("dwa.max_vel_cost", 3.0).value
+        self.min_vel_cost = self.declare_parameter("dwa.min_vel_cost", 0.0).value
         self.high_speed_sharp_traj_cost = self.declare_parameter(
-            "dwa.high_speed_sharp_traj_cost", 2.0).value
+            "dwa.high_speed_sharp_traj_cost", 2.0
+        ).value
         self.limit_angle = self.declare_parameter("dwa.limit_angle", 90).value
         self.max_lidar_distance = self.declare_parameter(
-            'dwa.max_lidar_distance', 4.5).value
+            "dwa.max_lidar_distance", 4.5
+        ).value
         self.min_lidar_distance = self.declare_parameter(
-            'dwa.min_lidar_distance', 1.0).value
-        self.spread_gaussian = self.declare_parameter(
-            'dwa.spread_gaussian', 2.5).value
-        self.kp = self.declare_parameter('dwa.kp', 2.2).value
-        self.kd = self.declare_parameter('dwa.kd', 1.5).value
+            "dwa.min_lidar_distance", 1.0
+        ).value
+        self.spread_gaussian = self.declare_parameter("dwa.spread_gaussian", 2.5).value
+        self.kp = self.declare_parameter("dwa.kp", 2.2).value
+        self.kd = self.declare_parameter("dwa.kd", 1.5).value
         # use NumPy array for vectorized ops; empty shape (0,3) means no obstacles
         self.obstacles = np.zeros((0, 3), dtype=float)
 
@@ -107,20 +116,26 @@ class DWAAckermannNode(Node):
         )
 
         # ROS interfaces
-        self.create_subscription(
-            PoseStamped, self.goal_topic, self.goal_cb, 10)
+        self.create_subscription(PoseStamped, self.goal_topic, self.goal_cb, 10)
         self.create_subscription(LaserScan, self.scan_topic, self.scan_cb, 10)
         self.create_subscription(
-            Marker, self.lookahead_sub_topic, self.lookahead_goal_cb, 10)
+            Marker, self.lookahead_sub_topic, self.lookahead_goal_cb, 10
+        )
         self.create_subscription(Odometry, self.odom_topic, self.odom_cb, 10)
+        if self.use_fused_odometry:
+            self.create_subscription(
+                Odometry, self.fused_odom_topic, self.fused_odom_cb, 10
+            )
+            self.fused_odom = Odometry()
         self.create_subscription(String, self.start_topic, self.start_cb, 10)
 
         self.pub_cmd = self.create_publisher(
-            AckermannDriveStamped, self.drive_topic, 10)
-        self.goal_marker_pub = self.create_publisher(
-            Marker, self.goal_marker_topic, 10)
+            AckermannDriveStamped, self.drive_topic, 10
+        )
+        self.goal_marker_pub = self.create_publisher(Marker, self.goal_marker_topic, 10)
         self.horizon_pub = self.create_publisher(
-            MarkerArray, self.horizon_marker_topic, 10)
+            MarkerArray, self.horizon_marker_topic, 10
+        )
 
         # TF
         self.tf_buffer = Buffer()
@@ -156,8 +171,9 @@ class DWAAckermannNode(Node):
         gaussian_weights = np.exp(-0.5 * ((idx - center) / sigma) ** 2)
 
         # Normalize to [v_min, v_max]
-        gaussian_weights = (gaussian_weights - gaussian_weights.min()) / \
-            (gaussian_weights.max() - gaussian_weights.min())
+        gaussian_weights = (gaussian_weights - gaussian_weights.min()) / (
+            gaussian_weights.max() - gaussian_weights.min()
+        )
         v_all = self.v_min + gaussian_weights * (self.v_max - self.v_min)
         return v_all
 
@@ -175,8 +191,9 @@ class DWAAckermannNode(Node):
         alpha = np.clip(alpha, 0.0, 1.0)
 
         # Quadratic nonlinear shrink
-        shrink_factor = 1.0 - (1.0 - self.omega_max_min /
-                               self.omega_max_full) * (alpha ** 2)
+        shrink_factor = 1.0 - (1.0 - self.omega_max_min / self.omega_max_full) * (
+            alpha**2
+        )
 
         omega_limit = self.omega_max_full * shrink_factor
 
@@ -197,7 +214,7 @@ class DWAAckermannNode(Node):
         n_max = self.n_v_omega_max
         n_min = self.n_v_omega_min
 
-        n_dynamic = n_max - (n_max - n_min) * (alpha ** 2)
+        n_dynamic = n_max - (n_max - n_min) * (alpha**2)
 
         return int(max(n_min, round(n_dynamic)))
 
@@ -216,36 +233,37 @@ class DWAAckermannNode(Node):
         v_all = self.compute_linear_vel()
 
         # Reuse a preallocated workspace to avoid per-cycle trajectory allocations.
-        all_trajs = self._all_trajs_buffer[:self.n_v_omega, : horizon + 1, :]
+        all_trajs = self._all_trajs_buffer[: self.n_v_omega, : horizon + 1, :]
         all_trajs.fill(0.0)
 
         # Integrate forward for all trajectories in a vectorized loop over time steps
         for t in range(1, horizon + 1):
             prev = all_trajs[:, t - 1, :]
             # integ_vel_scale is factor for integration computation
-            integ_ = self.integ_vel_scale_offset + \
-                self.odom.twist.twist.linear.x / self.integ_vel_scale
-            all_trajs[:, t, :] = self._euler_integration_step(
-                prev, integ_, omega_all)
+            integ_ = (
+                self.integ_vel_scale_offset
+                + self.odom.twist.twist.linear.x / self.integ_vel_scale
+            )
+            all_trajs[:, t, :] = self._euler_integration_step(prev, integ_, omega_all)
 
         # Vectorized goal cost
         goal = np.array(self.goal)
         traj_xy = all_trajs[:, :, :2]  # (n_omega, horizon+1, 2)
         dists_to_goal = np.linalg.norm(
-            traj_xy - goal[None, None, :], axis=2)  # (n_omega, horizon+1)
+            traj_xy - goal[None, None, :], axis=2
+        )  # (n_omega, horizon+1)
         min_goal_dists = np.min(dists_to_goal, axis=1)  # (n_omega,)
         # closer to goal = lower cost
         goal_costs = self.goal_cost * np.sum(dists_to_goal, axis=1)
         closest_traj_idx = int(np.argmin(min_goal_dists))
-        vel_scale = 1.0 - \
-            np.clip(self.odom.twist.twist.linear.x / self.v_max, 0.0, 1.0)
+        vel_scale = 1.0 - np.clip(self.odom.twist.twist.linear.x / self.v_max, 0.0, 1.0)
         # bonus for trajectory that gets closest to the goal, scaled by current velocity (encourages following the goal at low speeds, more freedom at high speeds)
         goal_costs[closest_traj_idx] -= self.goal_cost * vel_scale
 
         # Vectorized obstacle cost
         if self.obstacles.shape[0] > 0:
             obs_xy = self.obstacles[:, :2]  # (M,2)
-            obs_r = self.obstacles[:, 2]    # (M,)
+            obs_r = self.obstacles[:, 2]  # (M,)
 
             # Broadcast differences: (n_omega, horizon+1, M, 2)
             diff = traj_xy[:, :, None, :] - obs_xy[None, None, :, :]
@@ -259,10 +277,13 @@ class DWAAckermannNode(Node):
 
         # Velocity costs (vectorized)
         velocity_costs = (1 - (v_all - self.v_min) / (self.v_max - self.v_min)) * (
-            self.max_vel_cost - self.min_vel_cost) + self.min_vel_cost
+            self.max_vel_cost - self.min_vel_cost
+        ) + self.min_vel_cost
 
         # scale by velocity to penalize sharper turns at higher speeds
-        velocity_costs *= self.odom.twist.twist.linear.x * self.high_speed_sharp_traj_cost
+        velocity_costs *= (
+            self.odom.twist.twist.linear.x * self.high_speed_sharp_traj_cost
+        )
 
         total_costs = goal_costs + obs_costs + velocity_costs
         chosen_idx = int(np.argmin(total_costs))
@@ -274,7 +295,7 @@ class DWAAckermannNode(Node):
             chosen_idx,
             closest_traj_idx,
             all_trajs,
-            total_costs
+            total_costs,
         )
 
     # ----------------- ROS Callbacks -----------------
@@ -282,12 +303,14 @@ class DWAAckermannNode(Node):
         goal_on_map = [msg.pose.position.x, msg.pose.position.y]
         self.publish_goal_marker(*goal_on_map)
         goal_x_in_car, goal_y_in_car = self.transform_to_vehicle_frame(
-            msg.pose, self.car_pose_in_map)
+            msg.pose, self.car_pose_in_map
+        )
         self.goal = [goal_x_in_car, goal_y_in_car]  # goal in vehicle's frame
 
     def lookahead_goal_cb(self, msg: Marker):
         goal_x_in_car, goal_y_in_car = self.transform_to_vehicle_frame(
-            msg.pose, self.car_pose_in_map)
+            msg.pose, self.car_pose_in_map
+        )
         self.opt_vel = msg.pose.orientation.w
         self.goal = [goal_x_in_car, goal_y_in_car]  # goal in vehicle's frame
 
@@ -301,8 +324,9 @@ class DWAAckermannNode(Node):
         angles = angles[valid]
         ranges = ranges[valid]
 
-        mask = (angles >= -np.deg2rad(self.limit_angle)
-                ) & (angles <= np.deg2rad(self.limit_angle))
+        mask = (angles >= -np.deg2rad(self.limit_angle)) & (
+            angles <= np.deg2rad(self.limit_angle)
+        )
         angles = angles[mask]
         ranges = ranges[mask]
 
@@ -324,34 +348,74 @@ class DWAAckermannNode(Node):
     def odom_cb(self, msg: Odometry):
         self.odom = msg
 
+    def fused_odom_cb(self, msg: Odometry):
+        self.fused_odom = msg
+
     def compute_lidar_max_dist(self):
         linear_vel = self.odom.twist.twist.linear.x
-        return np.clip(((linear_vel/self.v_max) * (self.max_lidar_distance - self.min_lidar_distance)) + self.min_lidar_distance,
-                       self.min_lidar_distance, self.max_lidar_distance)
+        return np.clip(
+            (
+                (linear_vel / self.v_max)
+                * (self.max_lidar_distance - self.min_lidar_distance)
+            )
+            + self.min_lidar_distance,
+            self.min_lidar_distance,
+            self.max_lidar_distance,
+        )
 
     def get_pose(self):
         if not self.vel:
             return
         try:
-            now = rclpy.time.Time()
-            transform = self.tf_buffer.lookup_transform(
-                self.map_frame, self.base_link_frame, now, timeout=rclpy.duration.Duration(
-                    seconds=0.5)
-            )
-            yaw = euler_from_quaternion([
-                transform.transform.rotation.x,
-                transform.transform.rotation.y,
-                transform.transform.rotation.z,
-                transform.transform.rotation.w,
-            ])[2]
-            # compensating the base_link -> laser transform
-            tx = transform.transform.translation.x + \
-                self.laser_distance_from_base_link * math.cos(yaw)
-            ty = transform.transform.translation.y + \
-                self.laser_distance_from_base_link * math.sin(yaw)
+            if self.use_fused_odometry:
+                pose = self.fused_odom.pose.pose
+                tx = pose.position.x
+                ty = pose.position.y
+                yaw = euler_from_quaternion(
+                    [
+                        pose.orientation.x,
+                        pose.orientation.y,
+                        pose.orientation.z,
+                        pose.orientation.w,
+                    ]
+                )[2]
+            else:
+                now = rclpy.time.Time()
+                transform = self.tf_buffer.lookup_transform(
+                    self.map_frame,
+                    self.base_link_frame,
+                    now,
+                    timeout=rclpy.duration.Duration(seconds=0.5),
+                )
+                yaw = euler_from_quaternion(
+                    [
+                        transform.transform.rotation.x,
+                        transform.transform.rotation.y,
+                        transform.transform.rotation.z,
+                        transform.transform.rotation.w,
+                    ]
+                )[2]
+                tx = (
+                    transform.transform.translation.x
+                    + self.laser_distance_from_base_link * math.cos(yaw)
+                )
+                ty = (
+                    transform.transform.translation.y
+                    + self.laser_distance_from_base_link * math.sin(yaw)
+                )
+
             self.car_pose_in_map.position.x = tx
             self.car_pose_in_map.position.y = ty
-            self.car_pose_in_map.orientation = transform.transform.rotation
+            if self.use_fused_odometry:
+                self.car_pose_in_map.orientation = self.fused_odom.pose.pose.orientation
+            else:
+                transform = self.tf_buffer.lookup_transform(
+                    self.map_frame,
+                    self.base_link_frame,
+                    rclpy.time.Time(),
+                    timeout=rclpy.duration.Duration(seconds=0.5),
+                )
+                self.car_pose_in_map.orientation = transform.transform.rotation
             self.pose = [tx, ty, yaw]
         except Exception as e:
             self.get_logger().warn(f"Transform not available: {e}")
@@ -359,7 +423,9 @@ class DWAAckermannNode(Node):
     def control_loop(self):
         if not self.vel:
             return
-        chosen_v, chosen_omega, chosen_idx, closest_traj_idx, all_trajs, total_costs = self._run_dwa()
+        chosen_v, chosen_omega, chosen_idx, closest_traj_idx, all_trajs, total_costs = (
+            self._run_dwa()
+        )
 
         # if self.using_colored_horizons:
         #     self.publish_horizon_markers_colored(
@@ -376,8 +442,11 @@ class DWAAckermannNode(Node):
             cmd.drive.speed = 0.0
 
         # add a PD controller
-        error = math.atan2(chosen_omega * self.wheel_base_length,
-                           chosen_v) if chosen_v != 0 else 0.0
+        error = (
+            math.atan2(chosen_omega * self.wheel_base_length, chosen_v)
+            if chosen_v != 0
+            else 0.0
+        )
         p_controller = self.kp * error
         d_controller = self.kd * (error - self.last_error)
         cmd.drive.steering_angle = p_controller + d_controller
@@ -433,7 +502,9 @@ class DWAAckermannNode(Node):
             marker_array.markers.append(m)
         self.horizon_pub.publish(marker_array)
 
-    def publish_horizon_markers_colored(self, all_trajs, chosen_idx, closest_traj_idx, total_costs):
+    def publish_horizon_markers_colored(
+        self, all_trajs, chosen_idx, closest_traj_idx, total_costs
+    ):
         marker_array = MarkerArray()
 
         # Clear previous markers first, important because n_omega changes over time
@@ -495,24 +566,36 @@ class DWAAckermannNode(Node):
 
     # ----------------- Utilities -----------------
     def transform_to_map_frame(self, point, car_pose):
-        yaw = euler_from_quaternion([
-            car_pose.orientation.x,
-            car_pose.orientation.y,
-            car_pose.orientation.z,
-            car_pose.orientation.w,
-        ])[2]
-        tx = math.cos(yaw) * point.position.x - math.sin(yaw) * \
-            point.position.y + car_pose.position.x
-        ty = math.sin(yaw) * point.position.x + math.cos(yaw) * \
-            point.position.y + car_pose.position.y
+        yaw = euler_from_quaternion(
+            [
+                car_pose.orientation.x,
+                car_pose.orientation.y,
+                car_pose.orientation.z,
+                car_pose.orientation.w,
+            ]
+        )[2]
+        tx = (
+            math.cos(yaw) * point.position.x
+            - math.sin(yaw) * point.position.y
+            + car_pose.position.x
+        )
+        ty = (
+            math.sin(yaw) * point.position.x
+            + math.cos(yaw) * point.position.y
+            + car_pose.position.y
+        )
         p = Pose()
         p.position.x, p.position.y = tx, ty
         return p
 
     def transform_to_vehicle_frame(self, point_on_map: Pose, car_pose: Pose):
         # Convert quaternion to yaw angle
-        orientation_list = [car_pose.orientation.x, car_pose.orientation.y,
-                            car_pose.orientation.z, car_pose.orientation.w]
+        orientation_list = [
+            car_pose.orientation.x,
+            car_pose.orientation.y,
+            car_pose.orientation.z,
+            car_pose.orientation.w,
+        ]
         _, _, yaw = euler_from_quaternion(orientation_list)
         dx = point_on_map.position.x - car_pose.position.x
         dy = point_on_map.position.y - car_pose.position.y
